@@ -34,42 +34,7 @@ CortexDB OTel aims to bridge OpenTelemetry and these capabilities.
 - **Multi-tenant awareness:** Preserve tenant identity and isolation across telemetry ingestion and retrieval.
 
 ## Architecture
-
-```mermaid
-flowchart TD
-    A[Applications and Infrastructure]
-    A --> B[OpenTelemetry SDKs]
-    B --> C[OpenTelemetry Collector]
-
-    C --> D[CortexDB OTel Integration]
-
-    D --> E[OTLP Ingestion]
-    E --> F[Telemetry Normalization]
-
-    F --> G[Metrics Processing]
-    F --> H[Trace Processing]
-    F --> I[Log Processing]
-
-    G --> J[Ontology Resolver]
-    H --> J
-    I --> J
-
-    J --> K[Entity and Relationship Resolution]
-    K --> L[Knowledge Graph Enrichment]
-
-    G --> M[CortexDB]
-    H --> M
-    I --> M
-    L --> M
-
-    M --> N[Semantic Retrieval]
-    M --> O[Graph Retrieval]
-    M --> P[Diagnostic Evidence]
-
-    N --> Q[AI Diagnostic Agents]
-    O --> Q
-    P --> Q
-```
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/2c7f8b87-f30f-4852-8414-8b128f21b6bd" />
 
 ## Design principles
 
