@@ -1,0 +1,81 @@
+#!/bin/sh
+# CortexDB MCP launcher (macOS / Linux).
+#
+# Resolves the host OS/arch, downloads the matching prebuilt MCP server binary
+# from the GitHub release (cached in the plugin data dir), then execs it so the
+# stdio MCP transport passes straight through. No Go toolchain required.
+#
+# The cache key includes the plugin version, so upgrading the plugin downloads
+# the new server automatically instead of reusing a stale cached binary. The
+# version is read from the bundled plugin manifest next to this launcher; if it
+# can't be read, the launcher falls back to the "latest" release (which still
+# works, it just can't auto-refresh on upgrade).
+#
+# Override the download with a local binary by setting CORTEXDB_MCP_BIN.
+# No Go toolchain involved — only a prebuilt binary from the GitHub release.
+# Shared by both the Claude Code and Codex plugin configs.
+set -eu
+
+REPO="liliang-cn/cortexdb"
+
+if [ -n "${CORTEXDB_MCP_BIN:-}" ] && [ -x "${CORTEXDB_MCP_BIN}" ]; then
+  exec "${CORTEXDB_MCP_BIN}" "$@"
+fi
+
+os="$(uname -s)"
+arch="$(uname -m)"
+case "$os" in
+  Darwin) goos="darwin" ;;
+  Linux)  goos="linux" ;;
+  *) echo "cortexdb-mcp: unsupported OS '$os'" >&2; exit 1 ;;
+esac
+case "$arch" in
+  x86_64|amd64)   goarch="amd64" ;;
+  arm64|aarch64)  goarch="arm64" ;;
+  *) echo "cortexdb-mcp: unsupported arch '$arch'" >&2; exit 1 ;;
+esac
+
+asset="cortexdb-mcp-${goos}-${goarch}"
+
+# Resolve the plugin version so the cache invalidates on upgrade.
+plugin_root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "${plugin_root}/.claude-plugin/plugin.json" 2>/dev/null | head -n1)"
+
+cache_root="${CLAUDE_PLUGIN_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/cortexdb}"
+cache_dir="${cache_root}/bin"
+
+if [ -n "$version" ]; then
+  bin="${cache_dir}/${asset}-${version}"
+  url="https://github.com/${REPO}/releases/download/v${version}/${asset}"
+else
+  bin="${cache_dir}/${asset}"
+  url="https://github.com/${REPO}/releases/latest/download/${asset}"
+fi
+
+if [ ! -x "$bin" ]; then
+  mkdir -p "$cache_dir"
+  tmp="${bin}.download.$$"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmp"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$tmp" "$url"
+  else
+    echo "cortexdb-mcp: need curl or wget to download the prebuilt server binary." >&2
+    echo "cortexdb-mcp: or download it manually:" >&2
+    echo "  curl -fsSL '$url' -o '$bin' && chmod +x '$bin'" >&2
+    exit 1
+  fi
+  chmod +x "$tmp"
+  mv -f "$tmp" "$bin"
+  # Drop older cached builds (legacy unversioned + previous versions) so the
+  # cache doesn't grow unbounded across upgrades.
+  for old in "${cache_dir}/${asset}" "${cache_dir}/${asset}"-*; do
+    [ -e "$old" ] || continue
+    [ "$old" = "$bin" ] && continue
+    case "$old" in *.download.*) continue ;; esac
+    rm -f "$old"
+  done
+fi
+
+exec "$bin" "$@"

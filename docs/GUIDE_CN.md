@@ -1,0 +1,787 @@
+# CortexDB
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/liliang-cn/cortexdb/v2.svg)](https://pkg.go.dev/github.com/liliang-cn/cortexdb/v2) [![CI](https://github.com/liliang-cn/cortexdb/actions/workflows/ci.yml/badge.svg)](https://github.com/liliang-cn/cortexdb/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/liliang-cn/cortexdb/branch/main/graph/badge.svg)](https://codecov.io/gh/liliang-cn/cortexdb) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+纯 Go、单文件的 AI memory 和知识图谱库与插件。你可以把 CortexDB 嵌入自己的 Go agent 项目，作为 memory/KG 层；也可以把它装进 Claude Code 和 Codex，作为跨项目共享的记忆大脑。SQLite 为存储内核——一个文件即承载向量、lexical/RAG 检索、分作用域的 agent memory、RDF/SPARQL/RDFS/SHACL 知识图谱，以及 MCP tools。支持无 embedder（lexical 模式）或任意 OpenAI 兼容的 embeddings 端点。
+
+## 为什么选 CortexDB？
+
+当你想给 agent 一个可嵌入、可审计、图谱感知的长期记忆层，又不想额外部署更多基础设施时，CortexDB 适合放进候选名单。
+
+| 如果你正在考虑... | CortexDB 给你... | 取舍 |
+| --- | --- | --- |
+| `chromem-go` 或小型嵌入式向量库 | 一个 SQLite 文件里的向量、lexical 检索、durable knowledge、分作用域 memory、RDF/SPARQL 和 MCP tools | 如果只需要一个很小的向量集合，CortexDB 的表面积会更大 |
+| `sqlite-vec` 或裸 SQLite 扩展 | 面向 RAG、memory、hybrid retrieval、graph facts 和 agent tools 的 Go facade | 不如自己拼扩展时那么底层可控 |
+| Chroma、Qdrant、LanceDB 或托管向量库 | 无需单独服务、无需额外存储平面，lexical 模式也不需要 API key | 目标不是分布式向量数据库 |
+| Fuseki、GraphDB、Stardog 或独立图数据库 | 足够支撑 local-first agent 工作流的 RDF/SPARQL/RDFS/SHACL，并且和文本、memory 存在同一文件 | 不是完整企业级 RDF server |
+| 为 Claude Code/Codex 自己写 memory 表 | 打包好的插件、MCP server、auto-recall 路径，以及可复用的 memory/KG tools | 具体产品的记忆策略仍需要你自己定义 |
+
+准备 launch 或社区发帖时，可看 [docs/LAUNCH_KIT.md](LAUNCH_KIT.md)，里面有可直接改的 Show HN、Reddit 和 demo 脚本。
+
+## 功能一览
+
+- **KnowledgeMemory 大脑门面** — `Recall` / `Remember` / `Reflect` / `Consolidate` / `PromoteToKnowledge` / 上下文包;融合检索横跨情景记忆、持久知识与 GraphRAG 分块;关系型问题以**图边事实**回答(`Alice —uses→ Apollo`),无 embedder 也可靠;确定性(不调 LLM)的 `extract_conversation`;记忆可内联携带实体/关系,存储与入图一次完成。
+- **可组合检索** — `cortex_query`:vector / lexical / hybrid / graph 四条预取通道,RRF、加权 RRF 或 DBSF 融合,带元数据过滤与逐源打分调试;`Authorize` 回调在检索层对每个候选做 RBAC/ABAC 门禁;可插拔重排器。
+- **向量 + 词法引擎** — FTS5、HNSW / IVF / Flat 索引、标量与乘积量化，以及 `IndexTypeBinary`：1 bit 编码（内存只占 1/32），按汉明距离粗筛，再用原始精度对候选精确重排——真实 768 维向量上，默认 8 倍过采样时 recall@10 为 0.979–0.996，10 万条向量时比精确扫描快约 110 倍；PostgreSQL 上用 pgvector 的 `binary_quantize`。小设备上用 `cortexdb.EmbeddedConfig`：HNSW 索引存成 SQ8 编码，SQLite 的缓存和连接数有上限（`core.ResourceConfig`），索引快照定期保存、按 4 MiB 分块读写——10 万条 768 维向量从快照打开 0.28 秒，堆内存 193 MB，峰值 RSS 297 MB。地理索引、语义查询路由。
+- **外部召回通道** — 你已经在跑的搜索集群（Meilisearch、Weaviate…）可以通过 `QuerySource` 成为参与融合的一条 lane，而不必成为存储：它只点名候选 id，内容仍归大脑所有，过期的 id 会被丢弃而不是被编造成结果。
+- **知识契约** — 每条记录都能回答*我怎么知道的*和*我多确定*：`_source`、`_chunk`、`_producer`，以及一个闭集里的 `_grade` —— `verified`（有名有姓的人留下的）、`self_consistent`（从已陈述的东西推导出来的）、`asserted`（模型或人说的，没人核过）、`held`、`refused`（被词汇表拒绝，附原因）。`contract_tally` 回答整个书架站在什么之上，未标注的行也算进去；`contract_needs_attention` 列出需要人看的 —— 包括实体消解在"两个名字可能是同一个实体"时写下的 `possiblySame` 链接，而不是凭猜测直接合并；`fact_provenance` 引出事实所来自的原文；`verify_claims` 拿 (主语, 关系, 宾语) 三元组对照图谱逐条判定 —— supported、contradicted（单值关系上当前是另一个值、有效期已结束、或有 `_contradicts` 记录否定它）或 absent —— 每条判定都附来源，全程不调模型。生产者写入前调 `ValidateContract`。[alchemy](https://github.com/liliang-cn/alchemy) 往这里入库的每张图都带契约 —— 它六个 sink 里唯一这么做的。
+- **图片、音频和视频** — `ingest_media` 把照片、录音或视频存成文档，文字从文件里派生：图片的说明和图中可见的文字、录音的转写稿、视频的转写稿加上各帧说明，排在同一条时间线上。这些文字跟其他文档一样被检索，有没有嵌入模型都行，命中会给出文件和时间点（`media.spans`：`start_ms`/`end_ms`）。CortexDB 不调用任何模型：描述、转写和取帧都是接口，`pkg/media` 里有 Ollama、OpenAI 兼容（whisper.cpp）和 ffmpeg 的实现，调用方也可以自己派生文字再发过来。文件的哈希就是内容哈希：没变的文件不会被派生第二次，换了更好的模型只替换它自己的分块。
+- **可换存储后端** — 默认 SQLite；把 DSN 换成 `postgres://` 就把同一个大脑搬到 **PostgreSQL + pgvector**，向量、混合检索、记忆和 RDF 图谱在两个后端上都跑。注册表是编译期的，不是插件系统（存储是热路径）。104 个 opt-in 的 PostgreSQL 测试，大多是 parity 测试：一份测试体、两个数据库、必须给出相同答案。
+- **知识图谱** — 同一文件上的 RDF 三元组/四元组,**属性图也能当 RDF 读**:抽取和 `upsert_entities` 写进去的一切,都以只读三元组的形式参与 SPARQL、推理和 SHACL(`cxn:` 节点、`cxt:` 类型、`cxr:` 关系、`cxp:` 属性),不复制数据,也就没有同步问题。**RDF 1.2**:三元组项 `<<( s p o )>>`、具名化三元组和 `{| |}` 注解,于是"关于一条事实的事实"(谁说的、多大把握)本身也能查询;支持带书写方向的字面量。SPARQL 1.1 和 1.2——查询、带图管理(`ADD`/`COPY`/`MOVE`/`CLEAR`/`DROP`)的更新、全部属性路径、JSON/XML/CSV/TSV 结果格式,以及通过应用设置的处理器执行的 `SERVICE`——在两种后端上通过 W3C 官方测试:RDF 1.2 与 RDF/XML 全部通过,SPARQL 1.2 269/269,SPARQL 1.1 查询 329/331(两条是有意的宽松处理:`"1" + "2"` 得 3)、更新 157/157、结果格式和联邦查询全部通过。半朴素求值的物化推理,覆盖 RDFS 和 OWL 2 RL 规则——`inverseOf`、对称、传递、`equivalentClass`/`equivalentProperty`、`sameAs`、**键**(`FunctionalProperty` / `InverseFunctionalProperty` / `hasKey` 推出 `sameAs`:邮箱相同就是同一个人)、**属性链**,以及类表达式(`someValuesFrom`、`allValuesFrom`、`hasValue`、`intersectionOf`、`unionOf`、`oneOf`、最大基数)——事实变化时**自动**保持最新(删除再重推,异步执行,`WaitForInference` 可读到自己刚写入的结果),每条推理结果都能解释来源。矛盾(`disjointWith` 与 `AllDisjointClasses`、不相交属性、函数型属性出现两个值、`differentFrom` 与 `AllDifferent` 和推出的 `sameAs` 冲突、非自反和非对称属性、否定属性断言、`complementOf`、`owl:Nothing`、基数为 0)会连同冲突的三元组一起报告,绝不靠猜来消解。**完整的 SHACL Core**——全部属性路径、限定值形状、`sh:lessThan`、隐式类目标;W3C Core 测试 98/98——以及 **SHACL-SPARQL**(`sh:sparql` 约束和基于 SPARQL 的约束组件,支持预绑定;22 条通过 21 条,规范中可选的 `$shapesGraph` 除外),还有 **SHACL-AF 规则**(`sh:TripleRule`,支持条件、顺序和节点表达式,迭代到不动点,结果可解释)。属性图上的**只读 Cypher / GQL**(`graph_cypher_query`:MATCH / OPTIONAL MATCH / WITH / 最多 6 跳的变长路径 / 聚合;3,897 个 openCypher TCK 场景 0 错答——做不到的直接拒绝)。N-Triples/N-Quads/Turtle/TriG/JSON-LD 读写和 RDF/XML 导入(大多数 OWL 本体以此发布),JSON-LD 绝不拉取远程 context;属性图侧 `apply_inference` 物化两跳关系组合并带出处;实体记录断言文档,`delete_document_graph` 是按摄入形状做的删除。
+- **Ontology(Palantir 风格)** — 带主键与基数的对象/链接/接口类型,对象集代数(union / intersect / filter / `search_around`),带审计的受治理**动作类型**,自动生成的类型化 agent 工具,以及破坏性变更的 schema diff;`strict` 与 `vocabulary` 两种执行模式。
+- **历史** — 实体、关系、三元组、schema 的每个版本，以及现在生效的是哪一个：`graph_history`（按主语和谓词归成线，每个当前版本带 `in_effect` 原因）、`knowledge_graph_history`，SPARQL、查找、展开和 Cypher 工具上的 `as_of`，ontology 工具上的 `ontology_history` 与 `version` / `as_of` / `from_version`。实时视图有实体时间线、As of 固定时刻和 ontology 版本列表。详见下文“历史”一节。
+- **流水线** — `memoryflow`(转录 → 召回 → 唤醒 → 晋升)、`graphflow`(语料 → 图 → HTML 报告)、`importflow`(CSV / SQL dump / 在线 Postgres-MySQL → RAG + KG)、`connector`(PII 脱敏、签名计划、可逆保险库、CDC 同步)。
+- **工具与 MCP** — 100+ 工具,进程内与 MCP 同名同义,另有交互式图谱视图 `render_graph_html`,实时 3D 视图 `serve_graph_3d`(可在全库查找、提问、用 Cypher 查询、逐个节点展开邻居;只读、适配手机,每个视角都是可分享的链接:`?focus=`、`?ask=`、`?cypher=`;也可以切成按项目上架的记忆图书馆),`import_agent_memory`(把 Claude Code 和 Codex 已有的记忆导进来:记忆笔记、`CLAUDE.md` / `AGENTS.md`、Codex 的记忆库,按需把历史会话提炼成记忆),以及会分页的批量列举工具 `memory_list_all`、`graph_list_all`——`graph_list_all` 默认只给连接最密的核心子图,传 `order: "id"` 才会逐页走完整张图,像 `memory_list_all` 一样返回 `next_cursor`。
+- **对整个库发问** — 检索回答"什么与这个查询相关"，这几个回答"里面有什么"。*范围*检索返回距离查询一定距离内的全部、以外的一个不要，当 top-K 只是在编造一个 K 时这才是诚实的答案（`search_vector_range`，而且响应会说明是否有匹配被上限挡住）。`Aggregate` 按元数据字段计数、求和、分组（`aggregate_metadata`）。`VectorAggregate` 归约向量本身 —— 质心、几何中位数，以及 **medoid**：组内距离其余成员最近的那条**真实记录**，它用算术回答"这批近重复里哪条是正本""这一簇到底在讲什么"，全程不需要模型（`representative_records`）。两个后端行为一致，每种行为一份测试体、两边都跑。
+- **图自己描述自己** — `graph_schema` 报告**观察到的** schema（有哪些节点类型和边类型、每种边实际连接哪对类型、每种节点带哪些属性键），`graph_property_values` 报告某个键实际取哪些值——因为照着键名写的过滤（`color == "black"` 而库里存的是 `BLK`）返回空，而空看起来像个事实。声明的本体是可选的，恰恰在"没人知道形状"的那些图上不存在；这个是从行里量出来的，还附带一份**可以直接贴进 prompt** 的文本形式。同组还有 `rank_graph_nodes`（这个大脑在结构上到底关于什么；结果带计算时间缓存，只在图变了之后才重算）、`graph_statistics`（连通分量远大于 1 说明实体写进去了却从没被连上）、`graph_health`（按 producer 的增长突增、度数长尾里的枢纽节点、每天的 supersede 次数、单值关系同时存在多个值）和 `predict_graph_edges`（缺的事实，或同一实体存了两份）。
+- **整库问题** — `global_search` 把 GraphRAG 全局检索做成调用方显式选择的工具：`build_community_hierarchy` 用 Leiden 保留每一层社区（每一层的每个社区都内部连通，Louvain 保证不了这一点），自底向上写社区报告；`global_search` 在指定 `level` 的报告上做 map-reduce。有模型时由模型写报告和答案，没有模型时报告按确定性规则生成，按词面相关度排序后原样返回，不做综合。
+- **沿着图走的检索** — `retrieval_mode: "ppr"` 从问题点名的实体出发做个性化 PageRank（HippoRAG 2 的做法），再和词法或混合检索的第一阶段结果按排名融合。没有 embedder 时，问题点名了足够具体的实体（不是大多数段落都提到的那种，比如对话里的说话人），`auto` 就走这条路，否则保持词法检索。不管有没有 embedder，`SaveKnowledge` 都会建好这张实体图；读起来像名字的标题会关联到文档的每个分块。经 `SaveKnowledge`/`SearchKnowledge` 实测（`cortexdb-bench`，无 embedder），recall@5 词法 → `auto`：2WikiMultiHopQA 0.657 → 0.807，MuSiQue 0.457 → 0.542，LoCoMo 0.493 → 0.495，LongMemEval 0.861 → 0.862；p95 低于 30 ms。`graph` 模式按排名融合词法、实体关联和扩展出来的片段，精确的词法命中不会被图上的邻居挤下去。
+- **变更事件流** — 对节点、边、三元组、记忆、知识和本体 schema 的每一次已提交写入，都在同一个事务里追加到 `change_log`：按提交顺序、恰好一次，回滚的事务不留任何记录。可以按游标读取（`changes_since`、`db.Changes`），也可以在进程内订阅；默认保留 7 天或 50 万条。推理结果就是靠它保持最新的，触发器和同步也可以建在它上面。
+- **拿图给名字消歧** — `disambiguate_mentions` 用同句出现的其它名字来解析一个有歧义的名字：在候选之间找最短路径，每条渲染成一句话并带上 `edge_ids`。确定性的前四步归库，第五步"选哪个"归调用方——所以完全不需要模型也能用，而且任何时候都能说出为什么。连不上任何东西的提及标记为未解析，绝不退化成最接近的字符串。
+- **多跳问题的路径检索** — `search_paths` 在问题点名的实体之间遍历图，返回把它们连起来的事实链，按长度和关系类型打分，每条边都带着它出自的 chunk；`return_paths` 把这些链加进一次 GraphRAG 查询。`relation_policies`（按关系类型设权重和最大深度）可用于 `search_paths`、`expand_graph` 和 `HybridSearch`，让 `co_occurs_with` 不再和 `works_at` 算一样重。在一个带"长得像但错误"干扰项的 10 题多跳集上，5 个 chunk 预算下完整证据命中率从 0.50（chunk 检索）升到 0.80，干扰项占比从 0.36–0.43 降到 0.20。
+- **命中不再是半句话** — `chunk_window` 把命中块的邻块作为**上下文**带回来，明确标注、绝不当成命中。它治的是分块必然带来的那个毛病：一次真实检索返回的命中块第一个词是 `ance.`——*importance* 被切在块边界上。
+- **质量是测出来的** — `pkg/eval` 用标注查询集走真实检索路径,recall@k / nDCG 回归下限进 CI;FTS5 / SPARQL / SQL-dump 解析器有 fuzz 测试。
+
+## 安装与快速开始
+
+```bash
+go get github.com/liliang-cn/cortexdb/v2
+```
+
+```go
+db, _ := cortexdb.Open(cortexdb.DefaultConfig("KnowledgeMemory.db"))
+defer db.Close()
+
+q := db.Quick()
+_, _ = q.Add(ctx, []float32{0.1, 0.2, 0.9}, "SQLite is a single-file database.")
+hits, _ := q.Search(ctx, []float32{0.1, 0.2, 0.8}, 1)
+
+// 无 embedder 的 RAG（lexical）：
+_, _ = db.SaveKnowledge(ctx, cortexdb.KnowledgeSaveRequest{
+    KnowledgeID: "apollo", Content: "Alice owns Apollo. Apollo ships Friday."})
+resp, _ := db.SearchKnowledge(ctx, cortexdb.KnowledgeSearchRequest{
+    Query: "Who owns Apollo?", RetrievalMode: cortexdb.RetrievalModeLexical, TopK: 3})
+```
+
+## 分层 —— 选对层
+
+```text
+pkg/cortexdb   主 facade：向量、text/RAG 检索、knowledge、memory、KG、ontology、tools、MCP。  ← 从这里开始
+               KnowledgeMemory 架在它之上：Recall / Remember / Reflect / Consolidate / context pack。
+pkg/memoryflow Agent memory workflow：transcript ingest、recall、wake-up layers、promotion。
+pkg/graphflow  语料 → 抽取 → build → analyze → report → export（HTML）。
+pkg/importflow 导入 CSV / SQL dump / 线上 Postgres-MySQL 到 RAG + KG（DDL → 图谱）。
+pkg/connector  importflow 之上的隐私闸门：PII 脱敏、人工签字方案、可逆金库、CDC 同步。
+pkg/graph      底层 RDF/SPARQL/RDFS/SHACL + property graph。
+pkg/core       存储引擎（默认 SQLite，按 DSN 可换 PostgreSQL + pgvector）、embeddings、FTS5、
+               向量索引（HNSW/IVF/Flat）。
+```
+
+配套包：`pkg/eval`（检索质量评测 harness）、`pkg/rpcserver`（`cmd/cortexdb-grpc` 背后的 gRPC facade）、`pkg/agentmem` + `pkg/hindsight`（独立的 SQL agent memory bank，带 disposition 加权反思）、`pkg/semantic-router`（查询路由：基于 embedding、稀疏/词法或混合）、`pkg/quantization`（标量/二值向量压缩）、`pkg/geo`（地理空间索引）。
+
+## 存储后端 —— SQLite 或 PostgreSQL
+
+SQLite 是默认，也是这个库存在的理由：一个文件，不用起服务。当"一个文件"不再是
+合适的形态时 —— 多台应用服务器共享一个大脑，或者数据库归运维统一备份和复制 ——
+同一个大脑可以跑在 PostgreSQL + pgvector 上。**换后端只有 DSN 这一件事**：
+
+```go
+db, _ := cortexdb.Open(cortexdb.DefaultConfig("/var/lib/cortexdb/brain.db"))          // SQLite
+db, _ = cortexdb.Open(cortexdb.DefaultConfig("postgres://u:pw@host:5432/cortex"))     // or PostgreSQL + pgvector
+```
+
+裸路径一直表示 SQLite 文件，现在依然如此 —— 已有配置不用知道这些改动也照常工作。
+store 之上的一切都没变：向量、混合检索、记忆、RDF 图谱、SPARQL、ontology 和工具面
+在两个后端上都跑，`PostgresStore` 满足与 SQLite 版本相同的 `BrainStore` 契约。
+
+注册表（`core.RegisterStore`）**刻意是编译期的，不是插件系统**。存储是热路径 ——
+每次召回都经过它 —— 进程边界意味着每次搜索多一次 IPC 往返和序列化，而且事务无从谈起。
+它和 agent-go 的 `RegisterMemoryStore` 是同一个形状：已经会在那边换记忆后端的人，
+在这里不用学任何新东西，变的只有 DSN。
+
+### 真正的差异
+
+三处，而且都写在代码里，不是脚注：
+
+| 查询 | SQLite | PostgreSQL |
+| --- | --- | --- |
+| 非 CJK 全文 | FTS5 `unicode61` MATCH | `tsvector @@ plainto_tsquery('simple')` |
+| CJK，3 字及以上 | FTS5 trigram 伴随表 | `LIKE`，由 `pg_trgm` 加速 |
+| CJK，1–2 字 | `LIKE`，无索引 | `LIKE`，无索引 |
+
+最后一行不是 PostgreSQL 的短板 —— 两个字的词在任何一边都产生不出 trigram。同样的
+弱点落在同样的位置，这才使它可预期。用 `'simple'` 而不是 `'english'` 是有意的：
+`unicode61` 不做词干还原也不去停用词，一个偷偷做词干化的后端会让同一个查询
+因为跑在哪里而返回不同的行。
+
+- **pgvector 索引不了 2000 维以上。** 4096 维的模型依然可用、结果依然正确 ——
+  只是退化成精确扫描，随表线性增长。store 会在日志里说明这件事，而不是让你从
+  延迟曲线里推断。
+- **pgvector 是可选的。** CortexDB 连接用的账号未必有 `CREATE EXTENSION` 权限。
+  扩展缺失时，图谱的向量检索降级回原本就有的 Go 内扫描并提示一次，而不是拒绝启动。
+
+### 用验证代替相信
+
+PostgreSQL 覆盖是 opt-in 的，而且**跳过时会大声说** —— 一次全绿永远不会被误当成
+它并不具备的覆盖：
+
+```bash
+docker run -d --name cortexpg -e POSTGRES_PASSWORD=cortex -e POSTGRES_DB=cortex \
+  -p 127.0.0.1:43516:5432 pgvector/pgvector:pg16
+CORTEXDB_TEST_POSTGRES="postgres://postgres:cortex@127.0.0.1:43516/cortex?sslmode=disable" \
+  go test ./...
+```
+
+这会打开 `pkg/core`、`pkg/graph`、`pkg/cortexdb`、`pkg/agentmem`、`pkg/graphflow`、
+`pkg/sqldialect`、`internal/pgtest` 里的 PostgreSQL 测试；不设这个变量，同一次运行会
+显式 skip 它们，并指名哪些没有被覆盖。（`pkg/connector` 的 PostgreSQL、MySQL 数据源/CDC
+测试用的是自己的 DSN：`CONNECTOR_PG_DSN`、`CONNECTOR_PG_REPL_DSN` 和 `CONNECTOR_MYSQL_*`。）其中大部分是 parity 测试：一份测试体，在两个数据库上各跑一遍，
+断言它们给出相同答案。这才是要紧的那道闸 —— 因为这里的失效方式是静默的：
+可移植的 SQL 照样能解析、照样返回行，只是不再返回对的行。
+
+### 什么不算存储后端
+
+Neo4j、Qdrant 之类不在这个名单上，不是因为没顾上。这里的图就是两张表 ——
+`graph_nodes` 和 `graph_edges` —— 和向量、分块、agent 记忆在同一个数据库里，
+共用一个事务边界。SPARQL、RDFS 推理和 SHACL 校验都实现在这套 SQL 之上。把图搬到
+Neo4j 意味着：图与向量分家且两者之间没有事务；GraphRAG 的"先检索再沿边扩展"变成
+两次网络往返 + 应用层拼接；现有的 SPARQL/RDFS/SHACL 实现整套作废，改用 Cypher 重写。
+`pkg/sqldialect` 在这里也帮不上忙：它只处理四件真实差异（占位符重绑定、
+BLOB→BYTEA、"duplicate column" 错误文本、JSON 取值），SQL 文本原地保留 ——
+它是方言适配，不是查询构造器，够不到 Cypher。
+
+如果想用图数据库的查询语言处理这些数据，就导出过去 —— `knowledge_graph_export`
+输出 N-Triples/N-Quads/Turtle/TriG/JSON-LD —— 并让 CortexDB 继续做事实来源。
+
+### 真正合适的接口：外部召回通道
+
+你已经在跑的搜索引擎 —— Meilisearch、Weaviate，任何能给文本排序的东西 ——
+当不了大脑，但确实有这个大脑没有的召回能力。这和"存储"是两个问题，它有自己的接口：
+
+```go
+type QuerySource interface {
+    Name() string
+    Search(ctx context.Context, req QuerySourceRequest) ([]QuerySourceHit, error)
+}
+
+db, _ := cortexdb.Open(cfg, cortexdb.WithQuerySource(mySource))
+resp, _ := db.Query(ctx, cortexdb.QueryRequest{
+    Query: "rollbak",
+    Prefetch: []cortexdb.QueryPrefetch{
+        {Name: "lexical", Kind: cortexdb.QueryPrefetchLexical, Query: "rollbak"},
+        {Kind: cortexdb.QueryPrefetchSource, Source: "meilisearch"},
+    },
+})
+```
+
+source 返回的是 **id 和分数**。内容、元数据、collection、doc id 全部来自大脑本身。
+由此推出三件事，每一件都有对应的测试：
+
+- source **无法**注入 CortexDB 从未存过的文本。
+- 大脑里没有的 id 会被丢弃，而不是凭空造成一条结果。外部索引过期是常态，不是异常。
+- 通道给出的候选照样过请求的 filter，照样走和内建 lane 相同的融合，并在
+  `source_scores` 里带上通道名。
+
+通道报错会让整个查询失败，而不是悄悄让结果集变少 —— 一条静默消失的召回路径
+会在不声不响之间改变"搜索"的含义。
+
+`examples/17_query_source` 用**纯 `net/http`** 对接了真实的 Meilisearch —— 不往
+`pkg/` 里引任何 SDK，和把 LLM 客户端挡在外面是同一条规矩。它也给出了这么做的
+诚实理由：一个拼错的词 `rollbak`，FTS5 正确地匹配不到，而带容错的引擎能匹配到。
+
+## KnowledgeMemory —— 大脑 facade
+
+`db.KnowledgeMemory()` 是最高层 API：一次调用融合 episodic memory、durable knowledge 和知识图谱，返回一个可直接粘贴、带来源归属的 context pack。
+
+```go
+brain := db.KnowledgeMemory()
+_, _ = brain.Remember(ctx, cortexdb.KnowledgeMemoryRememberRequest{
+    Content: "Alice prefers tabs over spaces.", Scope: "user"})
+rec, _ := brain.Recall(ctx, cortexdb.KnowledgeMemoryRecallRequest{
+    Query: "what does Alice prefer?", EntityNames: []string{"Alice"}})
+fmt.Println(rec.ContextPack.Text) // sections + memory/knowledge/chunk ID + entities
+```
+
+- **`Recall` / `BuildContextPack`** —— 跨 memory、knowledge 与 GraphRAG chunk 的融合检索。关系型问题的答案以 **graph facts**（`Alice —uses→ Apollo`）形式返回，读的是图边而不是词法 chunk 匹配，所以"谁在用 X"这类问题即使没有 embedder 也能可靠回答。请求接受结构化检索计划：`keywords`、`alternate_queries`、`entity_names`、`retrieval_mode`。
+- **`Reflect` / `Consolidate`** —— 对一次 recall 做反思（可插拔 `KnowledgeMemoryReflector`，默认确定性实现），并把摘要写回为一条整合后的 memory。
+- **`PromoteToKnowledge`** —— 把 episodic memory 提升为持久、分块的 knowledge。
+- **`ExpandEntityContext` / `Neighbors` / `ShortestPath`** —— 围绕实体的图谱探索。
+- **`extract_conversation`** —— 确定性（无 LLM）地从会话文本或已存 session 中抽取实体、共现关系和摘要；`persist` 会写入 KG 与 durable knowledge。
+
+`MemorySaveRequest` 可以内联携带 `entities`/`relations`，agent 写入的 memory 在存储的同一次调用里就落进图谱。以上全部也以 MCP 工具形式暴露：`knowledge_memory_*` 系列，外加 `extract_conversation`。
+
+## 可组合检索
+
+`db.Query`（工具名 `cortex_query`）是一次通用检索调用：具名 **prefetch lane**（`vector`、`lexical`、`hybrid`、`graph`），用 **RRF / 加权 RRF / DBSF** 融合，支持 metadata filter、可选打分公式，以及按来源的 rank/score 调试输出。
+
+再往下，text search 接受 `Authorize` 回调——检索层的安全闸门（对每个候选做 RBAC/ABAC 判定；检索会不断放宽召回，直到能返回 TopK 条**已授权**结果）——以及可插拔的 `Reranker`，完成 recall→precision 的第二阶段。
+
+## 知识契约 —— 一条记录怎么说明它凭什么
+
+一个被多个生产者共用的大脑 —— 抽取管线、agent 的记忆工具、schema 导入 ——
+以前各自用自己的措辞回答"我怎么知道这件事"，等于没回答。契约是一套词汇表，
+写在每条记录本来就有的 metadata 里；有了它，这个库给出的答案才是可审计的，
+而不只是自信的。
+
+键全部带 `_` 前缀（`pkg/cortexdb/contract.go` 是可执行形式；规范文本在
+`docs/superpowers/specs/2026-09-05-knowledge-contract-design.md`）：
+
+| 键 | 含义 |
+| --- | --- |
+| `_source` | 来源 —— URL、文件、job、engagement。绝不是 DSN 或带凭据的路径：库是共享的，来源字符串谁都读得到 |
+| `_chunk` | 在来源里的 chunk 序号，生产者没分块时为 `-1` |
+| `_producer` | 怎么产出的：`llm-extract`、`ddl`、`tabular`、`graph-import`、`human`、`measured`、`compiled` |
+| `_grade` | 它的真实性由哪一类东西确立 —— 下面的闭集 |
+| `_state`、`_why` | 生产者自己对记录状态的说法，以及一次拒绝所附的原因 |
+| `_by`、`_at` | 谁断言的、何时；`_producer` 为 `human` 时必填 |
+| `_contradicts` | 与这条不能同时为真的记录 id，两边都写 |
+
+五个 grade，越靠后越弱：
+
+- **`verified`** —— 有名有姓的人复核后留下的。压过违规：复核者把投诉摆在面前
+  仍然留下它，是一个决定；把它评成 `refused` 等于让词汇表推翻它被升级给的那个人。
+- **`self_consistent`** —— 从已经陈述的东西（`CREATE TABLE`、既有图、表自己的行）
+  确定性推导而来，没和自身之外的任何东西核对过。
+- **`asserted`** —— 模型或人说的，没人核过。什么都不说的生产者默认得到它，
+  因为"未经核实地到来"是犯错时安全的那个方向。
+- **`held`** —— 等人处理。
+- **`refused`** —— 词汇表拒绝了它，`_why` 说明是哪条规则。
+
+生产者写入前调 `ValidateContract(meta)`；过不了契约的记录在写入时就被拒，
+而不是事后在数据库浏览器里才被发现。
+
+读回来是三个问题，各对应一个方法和一个工具：
+
+```go
+tally, _ := db.ContractTally(ctx)              // contract_tally
+rows, _  := db.NeedsAttention(ctx, 20)         // contract_needs_attention
+prov, _  := db.FactProvenanceFor(ctx, edgeID, true) // fact_provenance，带引文原文
+```
+
+生成的回答在转述之前可以先对照同一批记录核一遍。`VerifyClaims`（工具
+`verify_claims`）接收按名字或 id 给出的 (主语, 关系, 宾语) 三元组，逐条返回
+`supported`、`contradicted` 或 `absent`，附上判定所依据的边及其来源。contradicted
+指：单值关系（本体里有 ONE 一侧，或调用方在 `SingleValued` 里声明）当前是另一个值、
+事实的 `valid_to` 已过、或有一条当前边在 `_contradicts` 里点名否定它。确定性，不调模型。
+
+```go
+res, _ := db.VerifyClaims(ctx, []cortexdb.Claim{{Subject: "Leo", Relation: "lives_in", Object: "Beijing"}},
+	cortexdb.VerifyClaimsOptions{SingleValued: []string{"born_in"}})
+// res.Verdicts[0].Status == "contradicted", Reason == "single_valued_conflict"
+```
+
+`CheckAgainstSources`（工具 `check_against_sources`）核的是成段文字而不是三元组：
+每句话注明它引用的文档或 chunk，调用返回这句话里哪些事实（数字，以及拉丁字母写的
+名字和缩写）在所引来源里都找不到。数字只按整体匹配，名字只按来源里的整词匹配
+（APIs 里有 API，metadata 里没有 Meta）；大小写和重音不区分，`equivalents` 可以声明
+"48 kHz" 也算 "48kHz"。汉字、假名、谚文不检查。确定性，不调模型。
+
+`GraphHealth`（工具 `graph_health`）是全书架层面的对应物：按 producer 的增长（带突增检测）、
+入度/出度长尾、每天的 supersede 次数（关闭的事实、被替换的版本、撤回）、时间不变式
+（单值关系上区间重叠，或区间结束早于开始）。每项检查都报告自己是否报警。
+
+`ContractTally` 节点和边一起数 —— 图的断言大多是边，只数节点会把书架报得比实际
+可靠得多 —— 并在五个 grade 之外报出 `untagged`。在早于契约的书架上，或者一个
+生产者写、另一个不写的书架上，这是最大的那个数字；不画它的图表描述的是 3% 的
+数据，却看起来像全部。
+
+`alchemy` 往 CortexDB 入库的每张图都写契约：按各记录的 provenance 和本体的
+发现评 grade，并把复核者解决的冲突写成 `_contradicts`。它六个 sink 里只有这一个
+这么做；其余五个存下图、丢掉理由。
+
+### 记忆说明自己凭什么
+
+踩坑经验要能分享，读的人得分得清哪些验证过、哪些是猜测。记忆也带契约里的等级：`memory_save`、
+`knowledge_memory_remember`、`memory_update` 接受 `grade` 和 `grade_why`（存为 `_grade` / `_why`，
+所以也可以放在 `metadata` 里传）。
+
+- `verified`——由写入者以外的东西核实过：跑过的测试、测量、复现的 bug、某个人。必须用 `grade_why`
+  写明是什么核实的。
+- `asserted`——说过但没核实：怀疑的根因、没测过的修复。
+- `self_consistent`、`held`、`refused` 同其他记录（`held`、`refused` 需要 `grade_why`）。
+- 不传等级就是 **untagged**：没人说明。它和 `asserted` 分开，所以有等级之前写的记忆读起来和以前一样。
+
+召回会返回每条记忆的 `grade` 和 `grade_why`，解释记录和召回日志里也有。`memory_search` 和
+`knowledge_memory_recall` 的 `min_grade` 去掉可信度低于它的内容（verified > self_consistent >
+asserted = untagged > held > refused；召回时也作用于文档的 `_grade`）——答案要拿去执行时用
+`min_grade: "verified"`。context pack 把猜测单独放：标了 `asserted` 或 `held` 的记忆进
+`unverified_memories` 段，标题 "Unverified — said, not checked"；已验证的记忆那一行写明核实依据。
+自动召回注入的文本里，猜测在括号最前面标 `UNVERIFIED (asserted)`，已验证的标 `verified: …`。
+
+自动捕获会给写入的记忆打等级：只有对话里看得到核实过程才标 `verified`，猜测标 `asserted`（内容里也写明），
+偏好和决定不打等级——它们记录的是某人说了什么、选了什么。后来证实的猜测另存一条 verified 记忆并
+`supersedes` 原来那条，历史里两条都在。`--export-memory` 把 `grade` 和 `grade_why` 写进每个文件，
+`--sync-memory` 读回；`--export-memory <目录> --min-grade verified` 只导出验证过的，用来分享经验而不带猜测。
+
+## 知识图谱
+
+同一文件内嵌 RDF：triples/quads、namespaces、N-Triples/N-Quads/Turtle/TriG/JSON-LD 导入导出和 RDF/XML 导入（`RDFFormatRDFXML`），SPARQL 1.1 和 1.2（SELECT/ASK/CONSTRUCT/DESCRIBE、FROM/FROM NAMED、更新语句和图管理、OPTIONAL/UNION/MINUS/VALUES/BIND/FILTER、函数库与 XSD 类型转换、聚合、子查询、全部 property path `^p p/q p|q p+ p* p? !(p|^q)`、`SERVICE`），RDFS 加 OWL 2 RL 的物化推理，以及 SHACL Core 和 SHACL-SPARQL 校验。
+
+一致性用 W3C 官方测试衡量，SQLite 和 PostgreSQL 结果相同：RDF 1.2 语法测试（N-Triples、N-Quads、Turtle、TriG、RDF/XML）和 RDF 1.1 RDF/XML 全部通过；SPARQL 1.2 269/269；SPARQL 1.1 查询 329/331、更新 157/157、CSV/TSV/JSON 结果 10/10、联邦查询 10/10；SHACL Core 98/98，SHACL-SPARQL 21/22。两条 SPARQL 失败是有意的宽松处理——看起来像数字的普通字符串可以参与运算，因为通过非 SPARQL API 写入的数据常把数字存成字符串；SHACL 那一条是规范里可选的 `$shapesGraph`。每套测试都有一个代表性子集在 CI 中运行；设置 `CORTEXDB_W3C_TESTS`（w3c/rdf-tests 的检出）和 `CORTEXDB_SHACL_TESTS`（w3c/data-shapes 的 data-shapes-test-suite/tests）即可跑全量。
+
+`SPARQLResult.WriteResults` 把结果写成 SPARQL JSON、XML、CSV 或 TSV。`SERVICE` 自己绝不联网：由 `GraphStore.SetSPARQLServiceHandler` 决定有哪些端点，`HTTPSPARQLService` 是可直接使用或包在处理器里的 SPARQL 1.1 Protocol 客户端；没有处理器时 `SERVICE` 报错，`SERVICE SILENT` 跳过。出于同样的原因 `LOAD` 会被拒绝——自己读取文档后用 `ImportRDF`。
+
+属性图——抽取、`upsert_entities`、`upsert_relations` 写入的内容——也在其中。`FindTriples`（因此 SPARQL、推理、SHACL 都一样）会同时返回属性图蕴含的三元组，只读，位于图 `<urn:cortexdb:graph:property>`：节点 `X` 是 `cxn:X`，类型 `T` 是 `cxn:X a cxt:T`，类型为 `R` 的边是 `cxr:R`，属性 `k` 是 `cxp:k`，节点的 `name`（没有就用 `title`）是它的 `rdfs:label`。id 做精确的百分号编码（`entity:abc` → `cxn:entity%3Aabc`）。不复制数据，所以不会过期；`GraphStore.SetPropertyGraphProjection(false)` 可以关掉，对它的写入会被拒绝。
+
+```sparql
+SELECT ?who WHERE { ?x cxr:depends_on ?y . ?y rdfs:label "CortexDB" . ?x rdfs:label ?who }
+```
+
+推理用半朴素求值（每轮只 join 新增的部分），覆盖 `rdfs:subClassOf`、`rdfs:subPropertyOf`、`rdfs:domain`、`rdfs:range`、`owl:inverseOf`、`owl:SymmetricProperty`、`owl:TransitiveProperty`、`owl:equivalentClass`、`owl:equivalentProperty`、`owl:sameAs`。在投影上声明这些公理，能修正 LLM 抽取的常见问题：`cxt:host owl:equivalentClass cxt:Host` 统一类型的不同拼写，`cxr:depends_on owl:inverseOf cxr:depended_on_by` 回答反方向的问题，`owl:sameAs` 合并以两个名字存下的同一实体。超过上限（默认 32）的 `sameAs` 类只报告、不物化。
+
+键（`owl:FunctionalProperty` / `owl:InverseFunctionalProperty` / `owl:hasKey`）和最大基数为 1 的限制会推出 `sameAs`，`owl:propertyChainAxiom` 推出关系链。限制（`owl:onProperty` 上的 `owl:someValuesFrom`、`owl:allValuesFrom`、`owl:hasValue`）、`owl:intersectionOf`、`owl:unionOf` 和 `owl:oneOf` 给个体分类，模式规则推出限制之间的子类关系。矛盾——`owl:disjointWith`、`owl:AllDisjointClasses`、`owl:propertyDisjointWith`、`owl:AllDisjointProperties`、函数型属性出现两个值、`owl:differentFrom` 或 `owl:AllDifferent` 与推出的 `sameAs` 冲突、非自反和非对称属性、否定属性断言、`owl:complementOf`、`owl:Nothing`、最大基数为 0——连同三元组一起报告，绝不靠猜来消解。没有实现的规则是：对每个词项都成立的废话（`x sameAs x`、每个类是自己和 `owl:Thing` 的子类）、只含 RDFS 前提且实例层结论 RDFS 已经推出的模式重述、改写谓词的 `sameAs`，以及数据类型规则。推理结果由变更事件流自动维护（删除再重推，异步执行；`db.WaitForInference` 可读到自己写入的后果；`WithAutoInference(false)` 关闭），SHACL-AF 的 `sh:TripleRule` 规则通过 `knowledge_graph_shacl_rules` 运行。
+
+RDF 1.2 的三元组项（`<<( s p o )>>`、具名化、`{| |}` 注解）和 SPARQL 1.2 让"关于事实的事实"可以查询。`graph_cypher_query` 在属性图上回答只读的 openCypher / GQL 查询。
+
+节点属性存为 JSON，对某个属性做筛选默认要读遍所有节点，除非给它建了索引。`GraphStore.IndexNodeProperty(ctx, "run_id")` 为单个属性建表达式索引（按键手动开启，每次写入都要付出维护代价；另有 `NodePropertyIndexes`、`DropNodePropertyIndex`）。对已索引键的等值和 `IN` 筛选——`GraphFilter.Properties`，以及 Cypher 里的 `WHERE s.run_id = $run` 或 `{run_id: $run}`——会变成索引查找，Cypher 也会像对待 `id(n) = …` 一样从它出发做连接；在 SQLite 上，数值范围（`s.latency_ms > 3000`）同样走索引。节点可以不带向量：结构性节点（agent 的执行步骤、run）不必带向量写入，也不会参与向量搜索。`examples/19_execution_graph` 把这些组合成一个 agent 的执行记录。
+
+执行图有自己的 API。`db.StartRun` 开启一次运行（一个 `AgentRun` 节点）；`BeginStep` 在执行之前把步骤写成 running，并从它所消费输出的步骤连上 `TRIGGERED` 边；`EndStep` 用输出或错误、置信度、耗时（不填则从 begin 调用开始计算）、token 和费用重写这个步骤——事后补记一步用 `RecordStep` 一次完成——`FinishRun` 结束运行。步骤的种类（`LLMCall`、`ToolCall`、`Retrieval`、`DecisionPoint`、`Validation` 或自定义）就是节点类型，所以 Cypher 可以直接写 `(l:LLMCall)-[:TRIGGERED]->(t:ToolCall)`。`SummarizeRun` 汇总一次运行（按种类和状态计数、未结束和失败的步骤、token、费用、关键路径、置信度最低的步骤），`StepLineage` 向上游找出某个输出依赖的全部步骤，或向下游找出它影响的全部步骤，`ReplayRun` 从双时态历史中读出运行在任意时刻的状态。一个运行的步骤可以启动另一个运行（`RunStart.ParentStep`，一条 `SPAWNED` 边），用于子 agent。同样的九个操作也是 MCP 工具：`execution_run_start` … `execution_run_replay`。
+
+检索：`retrieval_mode: "ppr"` 从问题点名的实体出发做个性化 PageRank，再与第一阶段结果按排名融合；没有 embedder 时，问题点名了实体，`auto` 就会用它。每一次已提交的写入也会追加到变更事件流（`changes_since`、`db.Changes`）。
+
+```go
+db.UpsertKnowledgeGraph(ctx, cortexdb.KnowledgeGraphUpsertRequest{Triples: triples})
+res, _ := db.QueryKnowledgeGraph(ctx, cortexdb.KnowledgeGraphQueryRequest{
+    Query: `SELECT ?name WHERE { <https://example.com/alice> <https://schema.org/name> ?name }`})
+```
+
+RDFS 物化推理通过 `knowledge_graph_infer_refresh` / `_summary` / `_explain` / `_explain_match` 驱动。在 property graph 一侧，`ApplyInferenceRules`（工具名 `apply_inference`）把确定性的两跳关系组合——`A works_on B` + `B part_of C` ⇒ `A contributes_to C`——物化为带来源的可查询边。
+
+GraphRAG 实体带有 provenance：`upsert_entities` 把每个断言过该实体的文档记录进 `source_document_ids`；`delete_document_graph` 是与 ingest 对称的删除——移除文档的 chunk/document 节点、关系边，以及只被它断言过的实体（被其他文档共享的实体只解除关联、不删除），并提供 `dry_run` 模式。
+
+## Ontology（本体）
+
+CortexDB 在同一个文件里建模 Palantir 风格的 ontology：带强制主键的类型化 object type、每侧独立基数的 link type、用于多态检索的 interface、可组合的 object set 代数，以及通过 action type 完成的受治理写入。完整可运行示例见 [`examples/16_ontology`](../examples/16_ontology)。
+
+```go
+_, err := db.SaveOntologySchema(ctx, cortexdb.OntologySaveRequest{
+    Schema: cortexdb.OntologySchema{
+        SchemaID: "aviation",
+        InterfaceTypes: []cortexdb.OntologyInterfaceType{{APIName: "Facility"}},
+        ObjectTypes: []cortexdb.OntologyObjectType{{
+            APIName:       "Airport",
+            PrimaryKey:    "iataCode",     // 必填：对象的身份就来自它
+            TitleProperty: "facilityName",
+            Implements:    []string{"Facility"},
+            Properties: []cortexdb.OntologyProperty{
+                {APIName: "iataCode", DataType: cortexdb.OntologyDataType{Kind: cortexdb.OntologyDataString}, Required: true},
+            },
+        }},
+    },
+    Activate: true,
+})
+```
+
+同一时刻只有一份 schema 处于 **active**。激活的效果取决于 schema 的 `enforcement`：
+
+- `"strict"`（默认）校验调用方的每一次写入：未声明的 object type、未声明的属性、缺失的必填值、解析不了的值都会被拒绝。它不管库自己的簿记——内置抽取器产出的实体是无类型的，属于豁免范围，所以 active ontology 不会让 `SaveKnowledge` 变得不可用。这个豁免只认类型名，因此你自己提供的抽取器同样能写进一个仅以名字为键的裸节点。在它之下写入的节点身份是 `entity:<objectType>:<primaryKey>`；没有 active schema 时仍沿用旧的按名字推导的 ID。
+- `"vocabulary"` 把 schema 当作共享词表，不阻拦写入：已声明类型的拼写会被规范化、interface 在检索时照常展开，但一个说不出主键的实体——LLM 从散文抽取实体时的常态——会回落到按名字推导的 ID 而不是被拒绝，未声明的类型和 link type 直接放行。抽取管线用这个模式；strict 会逼它们在"激活 schema"和"保住实体"之间二选一。
+
+`strict_actions` 与 `enforcement: "vocabulary"` 互斥——一个关闭通用写入路径，另一个承诺永不关闭。
+
+**Object type** 带 `api_name`、`display_name`、`plural_display_name`、`description`、`status`、`visibility`、`primary_key`（必填）、`title_property`、`implements` 和类型化的 `properties`。数据类型：string、integer、long、double、decimal、boolean、date、timestamp、geopoint、geoshape、vector、array、struct、marking。属性可标记 `searchable`（进 FTS5）或 `vectorized`。`shared_properties` 让一个定义写一次、在多个 object type 与 interface 里按名字复用。
+
+**Link type** 是双向的，两侧各有自己的 `api_name` 和 `ONE`/`MANY` 基数。一对多 = 一侧 `ONE` + 一侧 `MANY`；只有 `ONE` 侧可以声明 `foreign_key_property`。
+
+**Interface** 提供多态：对 `Facility` 做 object set 或 `find_nodes` 查询会返回所有实现它的 object type。interface 可以多继承，object type 可以实现多个 interface，继承成环在保存时就被拒绝。interface 不能与 object type 同名——名字在同一命名空间里不区分大小写地解析，`Gateway` interface 和 `Gateway` object type 会成为一次歧义查找；`SaveOntologySchema` 在保存时就拒绝这种冲突。
+
+**Object set** 组合检索——向量检索、全文检索与图遍历在同一个表达式里是同级算子，而不是三套 API：
+
+```go
+resolved, err := db.ResolveObjectSetObjects(ctx, cortexdb.ObjectSetResolveRequest{
+    ObjectSet: cortexdb.ObjectSet{
+        Kind:     cortexdb.ObjectSetIntersect,
+        Operands: []cortexdb.ObjectSet{largeFacilities, airportsNearLondon},
+    },
+})
+```
+
+九种 kind：`base`、`interface_base`、`static`、`reference`（schema 上保存的具名集合）、`filter`、`search_around`、`union`、`intersect`、`subtract`。过滤谓词：`eq`、`lt`、`lte`、`gt`、`gte`、`in`、`is_null`、`contains`、`starts_with`、`contains_all_terms`、`contains_any_term`、`nearest_neighbors`，以及 `and`/`or`/`not`。`search_around` 最多串联 3 跳，与 Foundry 的限制一致。
+
+**Action type** 是受治理、可审计的写入：类型化参数、编辑规则（`create_object`、`modify_object`、`create_or_modify_object`、`delete_object`、`create_link`、`delete_link`）和提交条件。`validate_only` 只校验参数和提交条件、不写入；`return_edits` 返回本次产生的图编辑——两者互斥。校验从不读图，所以它不会报主键冲突。每次成功执行都会写审计记录。schema 上设 `strict_actions: true` 会关掉通用 upsert 工具，让 action 成为唯一写入路径。
+
+**类型化工具** 把 schema 变成 agent 可调用的界面——每个 action type 一个工具，可选每个 object type 一个列表工具，参数是真正的 JSON Schema 类型而不是一团自由文本：
+
+```go
+tools, err := db.GenerateOntologyTools(ctx, cortexdb.OntologyToolGenOptions{IncludeObjectTypes: true})
+```
+
+结果有数量上限（默认 32），并且**刻意不**注册进 `NewMCPServer`。OSDK 1.x 的生成代码随 ontology 线性膨胀；在这里同样的膨胀会落到 agent 每一次请求的 context window 上，所以是否暴露由调用方显式决定。
+
+**Schema diff** 在应用新版本之前回答"它会让哪些已有数据失效"：
+
+```go
+diff, err := db.DiffOntologySchema(ctx, cortexdb.OntologyDiffRequest{SchemaID: "aviation", Candidate: candidate})
+```
+
+破坏性变更：删除 object type 或 link type、删除属性、属性数据类型改变、属性由可选变必填、新增必填属性、主键变更、link 一侧改指向、基数由 `MANY` 收紧为 `ONE`。非破坏性的新增与放宽也会被报告，并标记为安全。两侧都会先展开 shared property，所以改共享属性的类型是可见的。
+
+工具：`ontology_save`、`ontology_get`、`ontology_list`、`ontology_delete`、`ontology_diff`、`ontology_history`、`ontology_draft`、`ontology_action_list`、`ontology_action_apply`、`object_set_resolve`。
+
+### 当前限制
+
+- **`vectorized` 需要 embedder 才有意义。** 配置了 embedder 时，类型声明了 vectorized 属性的对象，其节点向量就是这段文本的 embedding，`nearest_neighbors` 按语义作答。没有 embedder 时节点仍是词法哈希向量，用**文本**查询做 `nearest_neighbors` 就是在两个向量空间之间比较——这种情况要么显式传查询 `vector`，要么配置 embedder。
+- **属性只能通过删除对象来移除。** upsert 只更新它点名的属性，其余保持不变——这正是"一篇只是提到某对象的文档不会把它抹掉"的原因——所以省略一个属性并不会清空它。要清就用 `delete_entities` 再写一次。ontology 改版后不再声明的属性，在输入侧会被拒绝，但改版之前写下的行上仍然留着。
+- **`modify_object` 不会改写节点的显示标题。** 通过 modify 规则改 title 属性只更新属性本身，存储的标题不变，所以按名字解析端点仍会命中改名前的名字。
+- **刻意不建模：** Foundry 的 function runtime、branch/proposal、动态行级安全、backing datasource。那些需要的是 CortexDB 无意成为的那种平台。
+
+## 历史 —— 每个版本，以及现在生效的是哪一个
+
+事实变了，旧的不会被悄悄覆盖。每一层都留下被替换的版本，读取时可以问：有哪些版本、某个时刻是什么样、现在生效的这个版本为什么是它。整个过程不调用模型。
+
+**实体和关系。** 节点和边是双时态的：`valid_from` / `valid_to` 是事实在现实中成立的时间，`recorded_at` / `retracted_at` 是大脑记下它和不再认它的时间。一个版本结束后会移进 `graph_node_history` / `graph_edge_history`，附上 `reason`（`superseded`、`retracted`、`merged`、`document_deleted`、`orphaned`、`pruned`）、`superseded_by` 和 `producer`。`graph_snapshot` 读某个时刻的图，`graph_diff` 比较两个时刻。
+
+`graph_history`（`db.GraphHistory`）是一个实体的日志，最旧的版本在前。输入是 `entity`（节点 id，或名字，精确匹配或规范化后匹配），可选 `relation`、`from` / `to` 时间窗、`as_of`、`limit`（每页多少条线）、`max_versions`（每条线最多读多少个版本，保留最新的）和 `cursor`。结果把该实体两个方向上的边按主语、谓词和方向归成**线**：“Leo lives_in Beijing”之后又写了“Leo lives_in Chengdu”，是两个边 id，但在这里是一条线上的两个版本。每个版本带有效区间、`recorded_at` / `retracted_at`、`status`（`current`、`superseded`、`retracted`、`merged`、`ended`）、`reason`、`superseded_by`、`producer`、决定它结束的 schema id 和版本，以及出处（文档、分块、规则、来源）。一页是若干条线，`next_cursor` 接着往下读。
+
+处于生效状态的版本（当前，或 `as_of` 那一刻）带一个 `in_effect`，说明它为什么是有效的那个：
+
+| `kind` | 含义 |
+| --- | --- |
+| `only_version` | 没有断言过别的值 |
+| `replaced` | 它接替了更早的值，并说明依据的规则：schema vN 里的单值 link、某个 producer 明确的 supersede、撤回 |
+| `revised` | 同一条边被原地改写，来自一次更正或一次文档重新摄入 |
+| `merge_survivor` | 它所属的实体合并了另一个实体 |
+| `several_in_effect` | 这个 link 上有多个值同时有效；结果列出这些值，并说明 schema 对此的态度（`multi_valued`、`no_opinion` 或 `single_valued_unenforced`），不会指定谁赢 |
+
+**写入时的取代。** 当生效的 ontology 把某个 link 的一侧定为 `ONE`，`upsert_relations` 和 graphflow 会在写入新值的同一个事务里关闭旧值（`reason: superseded`，`superseded_by` 指向新边，被关闭的行上记下 schema id 和版本）。schema 对某个 link 没有说法时，什么都不关闭。从文档里抽取出来的关系在写入时不会被取代：两个值都保持有效，`graph_history` 把它们报告为 `several_in_effect`，并注明 `single_valued_unenforced` 或 `no_opinion`。`verify_claims` 和 `graph_health` 也会标出这类成对的值。
+
+**三元组。** `kg_triples` 只放当前有效的三元组。删除、SPARQL Update 或推理刷新去掉一个三元组时，它会在同一个事务里移进 `kg_triples_history`，记下时间、原因和执行者。推导出来的三元组也保留，连同规则和支持，所以回看过去得到的是当时的大脑说过的话。`knowledge_graph_query`（SPARQL）、`knowledge_graph_find`、`expand_graph` 和 `graph_cypher_query` 都有可选的 `as_of`（RFC 3339）：在 T 时刻删掉的三元组，在 T 之前的时刻能查到，从 T 起查不到。SPARQL Update 以及任何写操作带 `as_of` 都会被拒绝。`knowledge_graph_history` 列出某个 `subject`（必填）的三元组的各个版本，最旧的在前，可用 `predicate`、`object`、`inferred`、`from`、`to` 收窄，用 `limit` 和 `cursor` 翻页。在 Go 里用 `cortexdb.AsOf(ctx, t)` 把时刻放到 context 上。格式不对的 `as_of` 在所有工具上都是错误，不会当成“现在”。`vacuum_graph` 是唯一会销毁历史的调用，它也会清理三元组的历史（`PurgeReport.Triples`）。
+
+**Ontology 版本。** 每次保存 schema 都会往 `ontology_schema_versions` 追加一行（完整定义、`saved_at`、保存者，以及与上一版相比改了什么的摘要）；`ontology_activations` 记录某个 schema 的某个版本作为生效校验器的区间，以及是谁切换的。保存不会破坏更早的版本，删除 schema 后它的版本仍然保留。要回滚，就把旧定义再保存一次：这会追加一个内容与旧版相同的新版本。`ontology_history` 列出各版本（默认最新在前，`oldest_first` 反过来；可用 `limit`、`offset`），带变更摘要、生效标记和生效区间。`ontology_get` 接受 `version` 或 `as_of`（当时生效的 schema）。`ontology_diff` 接受 `from_version` 和 `to_version`，用来比较两个已保存的版本，而不是候选和当前版本。`ontology_action_audit` 的记录带有动作执行时的 schema id 和版本。
+
+**事实记得自己是按哪个 schema 判断的。** 由 ontology 决定的关闭，会把 schema id 和版本记在历史行上，`in_effect` 引用的就是那个版本。之后 schema 再改，这条解释也不会被改写。
+
+**实时视图。** 在图页面选中一个节点，点 History：出现一条竖向时间线，每个关系和方向一条轨道，每个版本像一次提交，显示有效区间、状态、被谁取代、出处，生效的版本还用文字写出 `in_effect` 的原因；“several values in effect”（多个值同时有效）会明确标出。图页面的 As of 输入框可以把整个页面固定在某个时刻（顶部横幅写明正在看过去，Now 回到现在），查找和展开也按这个时刻读。ontology 页面有一个链接指向 `/ontology-history`：一个 schema 的各版本，带 saved_at、saved_by、变更摘要和生效区间，任选两个版本可以看差异。页面通过 `/api/history`（`entity`、`relation`、`as_of`、`from`、`to`、`limit`、`max_versions`、`cursor`）、`/api/find` 和 `/api/expand`（`as_of`）、`/api/ontology/history`（`schema`、`limit`、`offset`、`oldest_first`）以及 `/api/ontology/diff`（`schema`、`from`、`to`）读取。这些接口都只读，格式不对的时刻返回 400。
+
+**gRPC 和 REST。** 历史工具是普通工具，和其他工具一样走 `ToolsService.CallTool`。只读 key 可以调用 `graph_history`、`knowledge_graph_history` 和 `ontology_history`；带 `as_of` 的写操作会被拒绝。限定在某个 collection 或 user 的 key 三个都不能用，因为历史表没有任何 scope 字段可以限定。
+
+**限制。**
+
+- 从文档抽取的关系保留两个值（见上），只有 `upsert_relations` 和 graphflow 会取代。
+- 在本次发布之前写入的三元组没有 `recorded_at`，读起来是“从最初就在”。在此之前保存的 ontology schema 只有一个版本，没有变更摘要，也没有保存者。
+- 推导出来的三元组在某个时刻是否存在是精确的；显示的规则和支持是最新的那一份。
+- 对部分绑定的 RDF 1.2 triple term 模式（`<<( ?s :p ?o )>>`）做 as-of 读取，会漏掉当前没有任何三元组使用的 triple term。
+- 图页面固定时刻后，查找按名字现在的样子匹配，再保留那个时刻已经存在的节点，所以当时叫另一个名字的节点用旧名字找不到。`/api/graph` 对格式不对的 `as_of` 返回 200，内容里写明固定失败，页面继续显示现在；其他历史接口返回 400。
+- 服务器没有配置 key 时，`saved_by` 和 `activated_by` 是空的。
+- 这些视图需要大脑带有这些工具；连到较旧的共享大脑时，历史面板会显示它返回的错误。
+
+## Tools、MCP 与插件
+
+```go
+tools := db.GraphRAGTools()                             // 进程内 tool calling
+server := db.NewMCPServer(cortexdb.MCPServerOptions{})  // MCP server
+```
+
+工具分组（100+ 个工具，进程内与 MCP 同名）：GraphRAG（`ingest_document`、`search_text`、`build_context`、`expand_graph`、`search_paths`、`find_nodes`、`delete_document_graph`）、统一检索（`cortex_query`）、knowledge/memory（`knowledge_save`、`memory_search` …）、KnowledgeMemory（`knowledge_memory_recall`、`_reflect`、`_consolidate`、`extract_conversation`）、KG（`knowledge_graph_query`、`_shacl_validate`、`apply_inference`）、ontology（`ontology_save`、`ontology_history`、`ontology_action_apply`、`object_set_resolve`）、历史（`graph_history`、`knowledge_graph_history`）、媒体（`ingest_media`、`search_media`）、维护（`vector_dimension_repair`、`sweep_expired`）。`cortexdb-mcp-stdio` 这个二进制额外提供 `render_graph_html`（交互式知识图谱视图）、`serve_graph_3d`、`side_graph_*`、`import_agent_memory`，本地模式下还有 `global_search` / `build_community_hierarchy`；`db.NewMCPServer` 只提供 facade 自己的工具。`memoryflow`/`graphflow`/`importflow`/`connector` 各自也暴露自己的 toolbox。
+
+### 实时视图
+
+`serve_graph_3d` 在大脑之上提供一个网页应用；在 shell 里用
+`cortexdb-mcp-stdio --graph-3d`，或在自己的程序里用 `liveview.New`，效果相同。
+默认浅色主题，可切换深色，手机和桌面都能用。
+
+- **Graph**：3D 图谱。关系带方向、按谓词着色；`co_occurs` 只说明两个名字一起出现过，
+  显示为灰色且默认隐藏。查找、提问、Cypher 和展开都面向整个库。带 `?focus=<id>` 的链接
+  打开时选中该节点，并把它放在面板没有遮住的那块屏幕正中。
+- **Changes**：每一条被新增、取代、撤回或合并的事实，最新的在前，用文字写出来
+  （"Leo lives_in Chengdu, replaced Beijing"），并标出决定取代的 schema。可按类型、操作、
+  写入者和实体筛选；新变化提交后即时出现。
+- **Entity**（`/entity?id=<id>`）：一个实体的关系，按谓词分组，分进和出两侧。每个当前值
+  写明它为什么生效，下面列出它取代的旧版本，最后是它最近的变化。
+- **Activity**：大脑处理的工具调用，每次读了什么、写了什么、连了什么。只有由 MCP server
+  提供视图时才有，因为只有它能看到调用。
+
+- **Recalls**（`/recalls`）：召回日志，见下文"可观测性"一节。新的召回记下来就出现在列表里。
+- **Library**（`/library`）：同一张图画成阅览室。记忆是它所属项目书架上的一本书，实体是一张
+  索引卡，书在阅读台上打开。
+- **Ontology**（`/ontology`）：把当前生效的 schema 按接口分成一条条泳道画出来，再对照记录
+  实际带的类型；没有被声明的类型列在模型之外。`?draft=1` 改画一份从库里已有词汇推出来的
+  schema 草稿供审阅，页面上不会保存它。有 schema 保存时页面会自己重读。
+- **Versions**（`/ontology-history`）：一个 schema 保存过的各个版本；任选两个比较，这一对版本
+  会写进链接（`?schema=&from=&to=`）。
+
+Recalls 和 Library 支持中文和英文，按 `?lang=`，否则按浏览器语言。这四个页面在第一次打开时
+才加载。
+
+应用由一条 Server-Sent Events 流 `/api/stream` 驱动。连接后先发 `snapshot`，带着拍快照时
+变更日志的游标；之后发 `delta`（图变了）、`activity` 和 `change` 事件，`change` 用自己的
+seq 作 SSE 事件 id。浏览器重连时带上 `Last-Event-ID`（脚本可以传 `?after=<seq>`），服务端
+从变更日志里补发这之后的变化，每条一次，然后转为实时；服务端重启也不会丢。日志补不上时先发
+`reset` 说明原因，再发一份新快照：`pruned`（游标早于保留期）、`behind`（一次补发不完）、
+`ahead`（游标来自更新的大脑）或 `unavailable`。用 `as_of` 固定在某个时刻的流不接收实时事件。
+
+页面读的是 `/api/changes`（最新在前；`before` 往前翻页，`kind`、`op`、`producer`、`entity`
+筛选，都可重复）和 `/api/entity?id=`，都只读。底下是 `changes_since` 的 `before`（从某个 seq
+往回读）和 `explain`（补上 `superseded_by`、`replaces`、schema id 和版本，以及事件涉及节点的
+名字），任何客户端都能调用同一个工具。
+
+要在别的程序里提供这个视图，把它的 handler 挂在一个前缀下：
+
+```go
+sv, _ := liveview.New(ctx, src, 2*time.Second, false)
+mux.Handle("/graph/", http.StripPrefix("/graph", sv.Handler()))
+```
+
+服务端会把应用的 `<base>` 改写成这个前缀，静态资源、API 和事件流都在 `/graph/` 下解析。
+
+宿主不需要全部页面时，可以去掉其中一些：
+
+```go
+sv, _ := liveview.New(ctx, src, 2*time.Second, false,
+	liveview.WithoutPages(liveview.PageRecalls, liveview.PageLibrary, liveview.PageOntology, liveview.PageVersions))
+```
+
+去掉的页面不出现在导航、命令面板和路由里，其他页面也不会再链接到它，访问它的路径返回 404。
+只有它读的 API 也一起返回 404：去掉 Recalls 时是 `/api/recalls*`（图谱的"按召回着色"和召回回放
+也一起去掉），去掉 Library 时是 `/api/library*`，去掉 Versions 时是 `/api/ontology/history` 和
+`/api/ontology/diff`，Ontology 和 Versions 都去掉时才去掉 `/api/ontology`。去掉 Changes 时
+`/api/changes` 保留，因为图谱的检查面板和实体页要读它。可以去掉的页面是 `PageChanges`、
+`PageActivity`、`PageRecalls`、`PageLibrary`、`PageOntology` 和 `PageVersions`；图谱和实体页
+不能去掉，传其他名字时 `New` 会报错。`Start` 接受同样的选项。
+
+前端源码在 `pkg/liveview/ui`，构建结果提交在 `pkg/liveview/dist` 并嵌入二进制，所以
+`go install` 不需要 Node。
+
+### 过期与清理
+
+`ingest_document`、`knowledge_save`、`knowledge_update` 接受 `expires_at`（RFC 3339 时间）。过了这个时间，文档不再出现在任何搜索、分块工具、图遍历和统计里，但仍可按 id 读到（`knowledge_get`）。不传这个字段会保留原来的过期时间，所以从源头重新同步不会解除保留期限；传空值则去掉过期时间。引擎把它存在自己的 metadata 键 `_expires_at` 下；名为 `expires_at` 的 metadata 键属于调用方，引擎从不读取。
+
+记忆仍然靠 `ttl_seconds` 过期。过期的行以前没人删：现在 `sweep_expired`（工具）、`DB.SweepExpired`（库）和 `cortexdb-mcp-stdio --sweep-expired [--dry-run] [--json]` 会删掉所有过期文档（记录、分块、图节点）和过期记忆，每一条在删除前再检查一次，列出之后又续期的会保留。设置了 `CORTEXDB_REMOTE` 时，命令通过工具清理共享大脑。`sweep_expired` 是写工具，任何读写 key 都能执行。
+
+升级前用过 `_expires_at` 或 `_review_status` 这两个 metadata 键的库，第一次真正清理前先跑一次 `--dry-run`，确认要删的是哪些。
+
+### 审核状态与审核门禁
+
+`ingest_document`、`knowledge_save`、`knowledge_update`、`memory_save`、`memory_update`（以及使用 `memory_save` 请求的 `knowledge_memory_remember`）接受 `review_status`（`proposed`、`accepted`、`rejected`），批准或拒绝时可带 `reviewed_by` 和 `reviewed_at`。服务端启用 key 时，审核人就是调用方的 key，`reviewed_by` 写成别人会被拒绝；提议（proposed）不带这两个字段。没有给出审核决定的写入保留原来的决定。引擎把它存在自己的键 `_review_status`、`_reviewed_by`、`_reviewed_at` 下，只放在记录上；名为 `review_status` 的 metadata 键属于调用方，引擎从不读取。
+
+服务端（或 `cortexdb-mcp-stdio`）设置 `CORTEXDB_REVIEW_GATE=1` 时，待审和被拒的文档、记忆不进任何搜索和召回、分块工具、统计，也不出现在从某个节点出发的图遍历里（`knowledge_memory_neighbors`、`knowledge_memory_expand_entity_context`、`expand_graph`、`get_nodes`、`search_paths`、`knowledge_memory_shortest_path`）。按原样读图的工具（`find_nodes`、`disambiguate_mentions`、`predict_graph_edges`、`rank_graph_nodes`、`graph_list_all`、`graph_cypher_query`）仍会返回，就像过期行在清理前仍会返回一样。不开门禁时只记录决定、不隐藏任何东西。门禁是整理用的过滤，不是权限控制：`knowledge_get` 和 `memory_get` 仍能按 id 读到被隐藏的行，任何写入方都能直接存为 `accepted`，`plan.filters.review_status` 也能让任何读取方列出某种状态的文档（记忆忽略这个过滤）。整理者用按 `_review_status` 过滤的 `aggregate_metadata` 列出待审内容，它读的是记录上的决定。在计划和统计里按 `accepted` 过滤时，也包括没有状态的文档。开门禁时，待审或被拒的记忆不会被提升为知识，对话摘要也不会包含它。引擎自己做的其他写入（整合、对话提取、导入）不带状态。
+
+### 图片、音频和视频
+
+`ingest_media` 接收图片、录音或视频。把文件作为 `data`（base64；默认上限 32 MiB，
+`CORTEXDB_MEDIA_MAX_BYTES`）发过来，大脑会派生它的文字：图片由描述模型写说明并读出
+图中文字（`CORTEXDB_MEDIA_VISION_URL` / `_MODEL`，Ollama 视觉模型），录音被转写成带
+时间的片段（`CORTEXDB_MEDIA_TRANSCRIBE_URL` / `_MODEL`，任何 OpenAI 兼容接口，
+whisper.cpp 的 `whisper-server` 也行），视频两样都有：转写稿，加上用 `ffmpeg` 每隔
+`CORTEXDB_MEDIA_FRAME_INTERVAL` 秒取一帧写的说明，排在同一条时间线上，同一个画面
+持续多帧只描述一次。也可以自己派生文字（能看图的 agent 自己就能写说明），带上文件的
+`sha256` 发 `caption`、`text` 或 `segments`，不发字节。经 gRPC 和 REST 一次调用上限
+4 MiB，所以共享大脑上的大文件走这条路。
+
+派生出的文字切成分块（录音的一个分块最多 30 秒），走所有文档都走的路径：没有嵌入模型
+时靠词和图谱找到，有嵌入模型时还能按语义找到。实体抽取跟 `knowledge_save` 一样，所以点名某个实体的 `graph` 或 `ppr` 检索能找到提到它的那个时间点；重新导入会重建这部分图谱。命中带 `media`：`media_type`、
+`duration_ms`，以及命中分块的 `spans`，客户端可以直接打开文件跳到那个时间点；分块
+记录上也有 `_start_ms`/`_end_ms`。文档记下 `_media_type`、`_media_size`、
+`_media_duration_ms` 和派生它的模型（`_media_derived_by`），它的 `_content_sha256`
+是文件的哈希：同一个文件用同样的模型再导入一次，不调用任何模型、什么也不写；换了新模型
+会重新派生，只替换它自己的分块；`dedupe` 拒绝集合里已有的文件，`if_sha256` 比较的是
+文件哈希。字节不入库，`source_url` 说明文件在哪。`examples/20_media` 用本地模型把一个
+文件夹里的照片、录音和视频跑一遍。
+
+配上媒体嵌入模型（`WithMediaEmbedder`；`CORTEXDB_MEDIA_EMBED_URL` / `_MODEL`，
+infinity 等带 `modality` 的 `/embeddings` 接口后面的 CLIP、SigLIP 或 CLAP 模型）后，
+图片、视频的每个取样帧，以及模型能处理声音时的录音，还会被嵌入到这个模型自己的向量空间，
+没有任何说明文字描述的照片也能按画面内容被找到。这些向量不进文本索引：它们存在
+`media_vectors` 里，每个模型和维度一个空间（`_media_embedded_by`），跟分块在同一个事务里
+写入，随文档一起删除；分块本身跟没有它时完全一样。文字检索也把问题嵌入这个空间，把找到的
+加进结果：文字检索已经找到的分块保持原来的顺序（其中的媒体命中只多一个 `media_score`），
+只靠媒体向量找到的分块按自己的名次插进来。媒体命中要达到最低余弦（`0.2`，
+`CORTEXDB_MEDIA_EMBED_MIN_SCORE`；CLIP 文字对图片的分数一般在 0.2 到 0.35），并且不低于
+最佳媒体命中的 85%，所以没有图片相符的问题一张也找不到。明确要求的关键词检索
+（`retrieval_mode: lexical`）保持不变；没有媒体的大脑回答跟以前一样。`search_media` 只查
+这个空间，可以用 `query` 文字，也可以把图片作为 `data`，找出看起来像它的图片和视频帧。
+没变的文件不会被再嵌入一次；换了模型会重新嵌入并替换它的向量。检索是精确扫描，适合一个
+媒体库，不适合上百万张图片。
+
+## Claude Code 和 Codex 插件
+
+把持久记忆 + 知识图谱作为插件装进 Claude Code（和 Codex）。它打包了 `cortexdb` skill 和一个常驻 MCP server，默认跑无 embedder 的 **lexical 模式**（无需 API key、无需 Go 工具链——server 二进制从对应 release 自动下载），所有数据存在一个**全局** SQLite 文件里、被所有项目共用。
+
+**安装 — Claude Code** —— 在 Claude Code 里逐条作为 slash 命令运行：
+
+```text
+/plugin marketplace add liliang-cn/cortexdb
+/plugin install cortexdb@cortexdb
+/reload-plugins
+```
+
+**安装 — Codex** —— 在 shell 里运行：
+
+```bash
+codex plugin marketplace add liliang-cn/cortexdb
+codex plugin add cortexdb@cortexdb
+```
+
+Codex 使用同一个默认全局大脑：`~/.cortexdb/cortexdb.db`。
+
+**使用** —— 直接跟 Claude 说话即可，它会替你调 MCP 工具（“记住我偏好……”、“你知道关于 X 的什么？”）；也可以用 slash 命令：`/remember <内容>`、`/recall <查询>`、`/cortexdb-graph`（交互式知识图谱查看），或 `/cortexdb` 唤起 skill。核心工具：`memory_save` / `memory_search`、`knowledge_save` / `knowledge_search`、`knowledge_graph_query`,以及统一的 `knowledge_memory_recall`。开启后，`SessionStart` 常驻指令 + `UserPromptSubmit` 自动召回 hook 会让 Claude 主动召回与保存（每台机器只问一次）。
+
+**数据存哪** —— 默认 `~/.cortexdb/cortexdb.db`，记忆跨项目跟着你走（多会话共用,SQLite WAL 保证安全）。想按项目隔离就覆盖：
+
+```bash
+export CORTEXDB_PATH=.cortexdb/cortexdb.db   # 会被启动的 server 继承
+```
+
+如果想显式指定同一个全局大脑：
+
+```bash
+export CORTEXDB_PATH="$HOME/.cortexdb/cortexdb.db"
+```
+
+升级：`/plugin update cortexdb` 然后 `/reload-plugins`——server 二进制会自动刷新（按版本号缓存）。全部环境变量见 `plugins/cortexdb/README.md`。
+
+### 共享大脑 —— 一个 CortexDB，多个 agent 和机器
+
+默认每个 agent 各开一个 SQLite 文件。改成都指向同一个 `cortexdb-grpc`，
+Claude Code、Codex、OpenClaw 以及其他 VM 里的 agent 就读写**同一份**记忆和知识图谱。
+
+在持有数据库的那台机器上：
+
+```bash
+CORTEXDB_PATH=$HOME/.cortexdb/cortexdb.db \
+CORTEXDB_GRPC_ADDR=10.0.0.5:47821 \
+CORTEXDB_GRPC_TOKEN=<token> cortexdb-grpc
+```
+
+在每个客户端上：
+
+```bash
+export CORTEXDB_REMOTE="10.0.0.5:47821"
+export CORTEXDB_GRPC_TOKEN="<同一个 token>"
+```
+
+改动就这些。MCP 服务器随后不再打开本地数据库：它在启动时向服务端查询工具清单并
+转发每次调用，所以**现有的和将来新增的工具都自动可用**。`UserPromptSubmit`
+自动召回 hook 走同一个远端，因此注入的记忆和工具写入的是同一个大脑；
+`--memory-html` 和 `--export-memory` 同样如此。
+
+传输是明文的，这是设计使然 —— 只能跑在环回、可信 LAN 或 Tailscale 上，或者放在
+做 TLS 终结的反向代理后面，以 `https://host` 发布。只用单个 token 时，**token 就是
+全部的访问控制**：拿到它就有完整读写权。要更细的控制，给服务端一个 key 文件
+（`CORTEXDB_KEY_FILE` 或 `-keys`）：每个 key 是 `read-only` 或 `read-write`，还可以
+限定在某些 user id、记忆 scope、namespace 和 collection 上。服务端会在 key 文件变化时
+重新读取它，增加或删除的 key 无需重启即可生效；文件写入后的 2 秒内，每次请求都会重读并
+比较内容，所以长度相同的密钥轮换也能被发现。读不出来的改动（文件无法读取、JSON 错误、
+没有任何 key）不会生效：原有的 key 继续有效，并记录一条日志。embedder 和 LLM 配置在
+服务端，不在客户端。`--graph-html` 和 `--export-memory` 同样读共享大脑；
+`--learn-path` 仍作用于本地数据库。
+
+手动跑起来足够试用；要让它常驻，[`deploy/`](../deploy/) 里有加固过的 systemd
+unit、healthcheck 就是服务端二进制自己（`cortexdb-grpc -health`）的容器镜像和
+compose 文件，以及配套的备份、升级和端口覆盖说明。**所有端口都有默认值，也都可以
+覆盖**：`CORTEXDB_GRPC_ADDR`（或 `-addr`）改服务端口，`CORTEXDB_LIVE_PORT`
+改实时图谱视图端口。
+
+图谱视图也是一个 MCP 工具 `render_graph_html`。它和 `serve_graph_3d`、`side_graph_*`、
+`import_agent_memory` 一样，是少数**不**代理到共享大脑、在 MCP 服务所在机器上执行的
+工具：图谱数据从远端读，但 HTML 在本机渲染和落盘 —— 调用方需要
+文件在自己的文件系统上才能打开或作为附件发出，服务端渲染会把文件留在大脑主机上，
+请求它的一方根本够不到。用 `CORTEXDB_VIEW_DIR` 指定输出目录。
+
+### 可观测性 —— 大脑做了什么、为什么
+
+每次调用都带一个 **request id**，从 MCP server 经 gRPC 一直到服务端的 trace 记录，并原路返回：
+gRPC metadata 和 REST header 里的 `x-request-id`，MCP 工具结果 `_meta` 里的
+`cortexdb/request_id`，以及失败的工具结果文本里。客户端可以自带（`x-request-id`，最多 64 个字母、
+数字、`.`、`_`、`:`、`-`），否则由第一个看到这次调用的服务端生成。Node 和 Python 客户端每次调用都会
+发一个，并挂在错误上（`err.requestId`、`e.request_id`）；Rust crate 从响应或 status 的 metadata 里读。
+回复不是 JSON 时，各插件和 `cortexdb-live` mod 报告实际收到了什么——大小、开头几个字节、request id——
+而不是解析器的报错。
+
+调用还属于一条**链路**（flow）：一个人发起的一次请求，经过的每个服务都串在一起，按 W3C Trace Context。
+带着 `traceparent` 来的调用——gRPC metadata、HTTP header，或 MCP `tools/call` 的
+`params._meta.traceparent`——作为它的子 span 运行（自己的 span id，调用方的 span 是父；`tracestate`
+原样传下去）。没带，或者带的值解析不了，就自己开一条 trace；格式不对的值直接丢弃，从不写进日志。服务端
+在响应 header/metadata 的 `traceparent` 里返回它跑这次调用的 span，MCP 工具结果在 `_meta` 的
+`cortexdb/traceparent` 里返回，和 request id 放在一起。CortexDB 沿途发出的调用——MCP bridge 到大脑、
+大脑到 embedder、LLM、reranker 或 SPARQL `SERVICE`——都会把链路带下去。日志行和 trace 记录在 request id
+旁边带 `trace_id`、`span_id`、`parent_span_id`，召回日志的每行带 `trace_id` 和 `span_id`；
+`recall_log_list` 加 `trace_id`（或 `/recalls?trace=<id>` 页面）回答"这条链路里大脑做了什么"，每次召回
+都带解释记录。把 CortexDB 当库嵌入的程序用
+`ctx = observability.WithTraceparent(ctx, traceparent, tracestate)` 把它接进自己的链路。
+
+trace（`CORTEXDB_TRACE=1`，或超过 `CORTEXDB_SLOW_MS` 的慢请求）是结构化日志：`log/slog`，默认 logfmt，
+`CORTEXDB_LOG_FORMAT=json` 输出 JSON，`CORTEXDB_LOG_LEVEL` 设级别。每条记录有 request id、key、工具、
+客户端的 host 和 project、各阶段耗时、回复字节数。`CORTEXDB_TRACE_FILE` 把同样的记录写成 JSON lines，
+超过 `CORTEXDB_TRACE_MAX_MB`（100）切分，保留 `CORTEXDB_TRACE_KEEP`（5）个旧文件，最长
+`CORTEXDB_TRACE_MAX_AGE_DAYS`（30）天。
+
+召回会解释自己。它的 trace 记录——以及请求带 `explain: true` 时的响应——包含检索计划（query、关键词、
+实体、模式，以及 `planner`：调用方怎么做出的计划，如 `fallback: no answer from the planner`）、每个检索器
+的前几名候选及原始分数（向量、关键词、图谱）、融合后的列表、每个阈值或过滤丢掉了什么及原因
+（`memory_semantic_floor`、`memory_keyword_floor`、`keyword_one_word`、`knowledge_vector_floor`、
+`knowledge_keyword_floor`、`expired`、`superseded`、`unreviewed`），以及最终命中。降级的回答会在响应里
+说明：查询向量化失败、只用了关键词时是 `degraded: ["embedder_unreachable"]`（另有
+`vector_search_failed`、`keyword_search_failed`）。
+
+开启 `CORTEXDB_HTTP_ADDR` 后，`/metrics` 新增：
+
+| 指标 | 回答的问题 |
+| --- | --- |
+| `cortexdb_embedder_up`、`cortexdb_embedder_requests_total{outcome,kind}`、`cortexdb_embedder_request_duration_seconds`、`cortexdb_embedder_probe_duration_seconds` | 向量服务连得上吗、多快 |
+| `cortexdb_recall_degraded_total{reason}` | 退回关键词检索（`embedder_unreachable`）等不完整的回答 |
+| `cortexdb_recalls_total{tool,key}`、`cortexdb_recalls_empty_total{tool,key}` | 按工具和 key 的召回次数，以及空结果的次数 |
+| `cortexdb_recall_floor_dropped_total{floor}` | 每个相关性阈值去掉的候选数 |
+| `cortexdb_grpc_response_bytes{grpc_method}` | 回复大小，在 MCP host 开始截断之前就能看到 |
+
+`/healthz` 报告进程和向量服务：`ok`，或向量服务失败时的 `degraded`（都返回 200——大脑仍能按关键词回答；
+加 `?strict=1` 则返回 503）。服务端每 `CORTEXDB_EMBED_PROBE_SECONDS`（60；`0` 关闭）探测一次向量服务，
+所以向量主机睡眠了，不用等有人召回也能看到。
+
+**召回日志**需要显式开启，因为它会保存查询文本：服务端（或本地大脑的 `cortexdb-mcp-stdio`）设
+`CORTEXDB_RECALL_LOG=1`，保留 `CORTEXDB_RECALL_LOG_DAYS`（30）天、最多
+`CORTEXDB_RECALL_LOG_MAX_ROWS`（100000）条。它是数据库文件里的一张表。每次召回记录提问方（key、host、
+project、agent）、延迟、命中及每条的检索方式、分数、写入者和来源，以及解释记录。工具
+`recall_log_list`、`recall_log_get`、`recall_log_stats`、`recall_feedback`、`recall_feedback_export`
+用来读取、把命中标为有用或噪音，并把标记导出为 recall eval 的 golden 用例（`--recall-eval` 的 JSONL 格式）。
+限定范围的 key 只能看到和标记自己的召回。
+
+live view 在 `/recalls` 读取它：召回时间线（带解释记录，每条命中可标有用/噪音）、按记录的视图
+（最常被召回、从未被召回、到达某条记录的查询），以及 `golden.jsonl` 下载。图谱页的
+**Colour by → Recalls**（`?color=recalls`）按被召回次数给节点着色，`?replay=<recall id>` 点亮某一次召回
+返回的节点。
+
+## OpenClaw 与 Hermes 原生记忆插件
+
+CortexDB 还提供两个会进入宿主记忆生命周期的原生适配器。它们都复用现有
+gRPC sidecar 与统一的 `knowledge_memory_recall`，不会建立平行的存储路径。
+
+- OpenClaw：[`liliang-cn/openclaw-cortexdb-memory`](https://github.com/liliang-cn/openclaw-cortexdb-memory)
+  注册独占的 `memory` capability，以及召回、保存、删除工具。
+- Hermes Agent：[`liliang-cn/hermes-cortexdb-memory`](https://github.com/liliang-cn/hermes-cortexdb-memory)
+  注册 `MemoryProvider`，自动执行每轮前召回与完成轮次同步。
+
+```bash
+# OpenClaw
+openclaw plugins install npm:cortexdb-openclaw-memory@2.57.2
+openclaw config set plugins.slots.memory cortexdb-memory
+openclaw gateway restart
+
+# Hermes Agent
+hermes plugins install liliang-cn/hermes-cortexdb-memory --enable
+hermes config set memory.provider cortexdb
+hermes gateway restart
+```
+
+先运行 `cortexdb-grpc`，再按各插件 README 安装。现有 [`skills/`](../skills/)
+仍适合提供显式工具指引与 helper，但 skill 本身不会替换宿主的原生记忆后端。
+
+## 在其他语言中使用（gRPC sidecar）
+
+`cortexdb-grpc` 通过 gRPC 暴露完整 facade，并提供 Rust/Python/Node 的类型化客户端：
+
+```bash
+go install github.com/liliang-cn/cortexdb/v2/cmd/cortexdb-grpc@latest
+CORTEXDB_PATH=my.db CORTEXDB_GRPC_TOKEN=s3cret cortexdb-grpc   # 127.0.0.1:47821
+cargo add cortexdb-client   # pip install cortexdb-client   # npm install cortexdb-client
+```
+
+## 质量
+
+检索质量是**被测量**的,不是假设的:`pkg/eval` 用标注查询集跑真实检索路径,报告 recall@k / precision@k / MRR / nDCG,并在 CI 里设回归下限(`go test ./pkg/eval -run TestLexicalRetrievalQuality -v`)。解析/检索面(FTS5、SPARQL、SQL dump 导入)有 Go fuzz 测试(`go test ./... -run Fuzz`),其保存的语料是永久回归种子。
+
+## 示例与状态
+
+`examples/01_core` … `19_execution_graph` 短小、面向架构（`go run ./examples/01_core`）；01-07/09/15/16/18/19 可独立运行，其余需要 LLM/embeddings/线上 DB——见 [examples/README.md](../examples/README.md)。
+
+一个可嵌入的 local-first AI memory/KG 库——并非 Fuseki/GraphDB/Stardog 这类完整图数据库产品的替代品。一个文件、Go API、tool/MCP 接口，以及足够构建实用记忆工作流的 RDF/SPARQL/RDFS/SHACL 能力。

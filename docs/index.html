@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CortexDB — AI memory and a knowledge graph in one SQLite file (pure Go)</title>
+<meta name="description" content="CortexDB is an open-source, pure-Go library that keeps vectors, full-text search, RAG knowledge, agent memory and an RDF/SPARQL knowledge graph in one SQLite file. Works without an embedding model. MIT licensed.">
+<link rel="canonical" href="https://liliang-cn.github.io/cortexdb/">
+<link rel="alternate" hreflang="en" href="https://liliang-cn.github.io/cortexdb/">
+<link rel="alternate" hreflang="zh-CN" href="https://liliang-cn.github.io/cortexdb/zh/">
+<link rel="alternate" hreflang="x-default" href="https://liliang-cn.github.io/cortexdb/">
+<link rel="alternate" type="text/plain" title="LLM summary" href="https://liliang-cn.github.io/cortexdb/llms.txt">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+<meta name="author" content="Liang Li">
+<meta name="theme-color" content="#faf9f6">
+<meta name="color-scheme" content="light">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CortexDB">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta property="og:url" content="https://liliang-cn.github.io/cortexdb/">
+<meta property="og:title" content="CortexDB — AI memory and a knowledge graph in one SQLite file">
+<meta property="og:description" content="Vectors, full-text search, RAG, agent memory and an RDF/SPARQL knowledge graph in one file. Pure Go, no CGO, works without an embedding model.">
+<meta property="og:image" content="https://liliang-cn.github.io/cortexdb/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CortexDB: AI memory and a knowledge graph in one SQLite file">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CortexDB — AI memory and a knowledge graph in one SQLite file">
+<meta name="twitter:description" content="Vectors, full-text search, RAG, agent memory and an RDF/SPARQL knowledge graph in one file. Pure Go, works without an embedding model.">
+<meta name="twitter:image" content="https://liliang-cn.github.io/cortexdb/assets/img/og.png">
+
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="preload" href="assets/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css?v=2026100201">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": "https://liliang-cn.github.io/cortexdb/#code",
+      "name": "CortexDB",
+      "description": "A pure-Go, single-file AI memory and knowledge graph library. One SQLite file holds vectors, FTS5 full-text search, RAG knowledge, scoped agent memory, an RDF 1.2 knowledge graph with SPARQL, RDFS and OWL 2 RL inference, SHACL validation and read-only Cypher, and 80+ MCP tools. Works without an embedding model; PostgreSQL with pgvector is an optional backend.",
+      "url": "https://liliang-cn.github.io/cortexdb/",
+      "codeRepository": "https://github.com/liliang-cn/cortexdb",
+      "programmingLanguage": "Go",
+      "runtimePlatform": "Go 1.25+",
+      "license": "https://opensource.org/licenses/MIT",
+      "version": "2.147.1",
+      "dateModified": "2026-10-02",
+      "author": { "@id": "https://liliang-cn.github.io/cortexdb/#author" },
+      "keywords": "AI memory, agent memory, knowledge graph, vector database, RAG, GraphRAG, SQLite, Go, SPARQL, RDF, MCP, HippoRAG, Personalized PageRank",
+      "sameAs": [
+        "https://github.com/liliang-cn/cortexdb",
+        "https://pkg.go.dev/github.com/liliang-cn/cortexdb/v2",
+        "https://crates.io/crates/cortexdb-client",
+        "https://pypi.org/project/cortexdb-client/",
+        "https://www.npmjs.com/package/cortexdb-client"
+      ]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://liliang-cn.github.io/cortexdb/#app",
+      "name": "CortexDB",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Linux, macOS, Windows",
+      "softwareVersion": "2.147.1",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": "https://github.com/liliang-cn/cortexdb/releases",
+      "isBasedOn": { "@id": "https://liliang-cn.github.io/cortexdb/#code" }
+    },
+    {
+      "@type": "Person",
+      "@id": "https://liliang-cn.github.io/cortexdb/#author",
+      "name": "Liang Li",
+      "url": "https://github.com/liliang-cn"
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://liliang-cn.github.io/cortexdb/#website",
+      "name": "CortexDB",
+      "url": "https://liliang-cn.github.io/cortexdb/",
+      "inLanguage": ["en", "zh-CN"],
+      "publisher": { "@id": "https://liliang-cn.github.io/cortexdb/#author" }
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://liliang-cn.github.io/cortexdb/#page",
+      "url": "https://liliang-cn.github.io/cortexdb/",
+      "name": "CortexDB — AI memory and a knowledge graph in one SQLite file",
+      "isPartOf": { "@id": "https://liliang-cn.github.io/cortexdb/#website" },
+      "about": { "@id": "https://liliang-cn.github.io/cortexdb/#code" },
+      "inLanguage": "en",
+      "dateModified": "2026-10-03",
+      "primaryImageOfPage": "https://liliang-cn.github.io/cortexdb/assets/img/live-view-dark-1600.webp"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://liliang-cn.github.io/cortexdb/#faq",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is CortexDB?", "acceptedAnswer": { "@type": "Answer", "text": "CortexDB is an open-source Go library that stores an AI agent's memory and knowledge in one SQLite file: vectors, full-text search, RAG documents, scoped memories, and an RDF knowledge graph you can query with SPARQL or read-only Cypher. It runs inside your program; there is no server to operate. It is MIT licensed." } },
+        { "@type": "Question", "name": "Does CortexDB need an embedding model or an LLM?", "acceptedAnswer": { "@type": "Answer", "text": "No. CortexDB never imports an LLM SDK. Without an embedder it uses lexical retrieval (FTS5, including Chinese and Japanese text) and still builds an entity graph that graph-walking retrieval uses. Plugging in any OpenAI-compatible embeddings endpoint, such as Ollama, adds vector and hybrid search." } },
+        { "@type": "Question", "name": "How is CortexDB different from a vector database?", "acceptedAnswer": { "@type": "Answer", "text": "A vector database stores embeddings and answers nearest-neighbour queries. CortexDB is an embedded library that also keeps agent memory with scopes, documents for RAG, and a knowledge graph with inference and validation, all in one file next to your code. It is not a distributed vector database and not an enterprise RDF server." } },
+        { "@type": "Question", "name": "Can I use CortexDB from languages other than Go?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The cortexdb-grpc server exposes the same brain over gRPC, with typed clients for Rust (cargo add cortexdb-client), Python (pip install cortexdb-client) and Node.js (npm install cortexdb-client). Agents can also use it through its MCP server." } },
+        { "@type": "Question", "name": "Does CortexDB work with Claude Code and Codex?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. It ships as a plugin for both. In Claude Code run /plugin marketplace add liliang-cn/cortexdb, then /plugin install cortexdb@cortexdb. The plugin runs in lexical mode with no API key and keeps one global brain at ~/.cortexdb/cortexdb.db; point several machines at one cortexdb-grpc server to share it." } },
+        { "@type": "Question", "name": "Which databases can CortexDB run on?", "acceptedAnswer": { "@type": "Answer", "text": "SQLite by default, through the pure-Go modernc.org/sqlite driver, so there is no CGO. A postgres:// connection string moves the same brain to PostgreSQL with pgvector; vectors, hybrid search, memory and the RDF graph behave the same on both." } },
+        { "@type": "Question", "name": "What graph queries does CortexDB support?", "acceptedAnswer": { "@type": "Answer", "text": "SPARQL 1.1 (a documented practical subset) with SPARQL 1.2 triple terms, read-only Cypher over the property graph, RDFS and an OWL 2 RL subset kept current automatically as facts change, SHACL validation and SHACL-AF triple rules. The in-scope W3C RDF 1.2 and SPARQL 1.2 test suites pass on SQLite and PostgreSQL." } },
+        { "@type": "Question", "name": "How good is CortexDB's retrieval without an embedder?", "acceptedAnswer": { "@type": "Answer", "text": "Measured through the public API with cortexdb-bench, no embedder, recall@5 in the default auto mode against plain lexical search: 2WikiMultiHopQA 0.807 vs 0.657, MuSiQue 0.542 vs 0.457, LoCoMo 0.495 vs 0.493, LongMemEval 0.862 vs 0.861, with p95 latency under 30 ms. The multi-hop gains come from a Personalized PageRank walk over the entity graph." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="./" aria-label="CortexDB home">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#15171c"/><path d="M20 42 L32 20 L45 40 Z" fill="none" stroke="#5fd3b4" stroke-width="3.4" stroke-linecap="round" opacity=".55"/><circle cx="32" cy="20" r="6.5" fill="#5fd3b4"/><circle cx="20" cy="42" r="6.5" fill="#fff"/><circle cx="45" cy="40" r="6.5" fill="#fff"/></svg>
+      CortexDB
+    </a>
+    <nav aria-label="Primary">
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#start">Get started</a></li>
+        <li><a href="#benchmarks">Benchmarks</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li><a href="https://github.com/liliang-cn/cortexdb/blob/main/docs/GUIDE.md">Guide</a></li>
+      </ul>
+    </nav>
+    <div class="bar-actions">
+      <a class="lang" href="zh/" hreflang="zh-CN" lang="zh-CN">中文</a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/liliang-cn/cortexdb">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+        <span class="label">GitHub</span>
+      </a>
+      <details class="menu">
+        <summary aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
+        <div class="menu-panel">
+          <a href="#features">Features</a>
+          <a href="#start">Get started</a>
+          <a href="#benchmarks">Benchmarks</a>
+          <a href="#faq">FAQ</a>
+          <a href="https://github.com/liliang-cn/cortexdb/blob/main/docs/GUIDE.md">Guide</a>
+        </div>
+      </details>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <a class="eyebrow" href="https://github.com/liliang-cn/cortexdb/releases/tag/v2.147.1" style="text-decoration:none"><span class="dot"></span>v2.147.1 · rewriting a chunk no longer leaves a stale entry in the full-text indexes</a>
+      <h1>AI memory and a knowledge graph in <em>one SQLite file</em>.</h1>
+      <p class="lede"><strong>CortexDB</strong> is an open-source Go library for agent memory. One file holds vectors, full-text search, RAG documents, scoped memories and an RDF knowledge graph with SPARQL, inference and validation. It runs inside your program, works without an embedding model, and is MIT licensed.</p>
+      <div class="install">
+        <code id="install-go"><span class="prompt">$ </span>go get github.com/liliang-cn/cortexdb/v2</code>
+        <button class="copy" type="button" data-copy="install-go" aria-label="Copy install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button>
+      </div>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#start">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/liliang-cn/cortexdb/blob/main/docs/GUIDE.md">Read the guide</a>
+      </div>
+    </div>
+    <figure style="margin:0">
+      <div class="screen">
+        <div class="screen-bar" aria-hidden="true"><i></i><i></i><i></i><span>serve_graph_3d — live brain</span></div>
+        <img src="assets/img/live-view-dark-1600.webp"
+             srcset="assets/img/live-view-dark-800.webp 800w, assets/img/live-view-dark-1600.webp 1600w"
+             sizes="(min-width: 980px) 540px, 100vw"
+             width="1600" height="1000" fetchpriority="high"
+             alt="The CortexDB live view, dark theme: the code graph of CortexDB itself, packages, files and types colored by node type, with package names drawn on the scene">
+      </div>
+      <figcaption class="caption"><code>serve_graph_3d</code> on the code graph of CortexDB itself: 600 of its 3,835 symbols drawn, the rest one search or expansion away.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="facts-title" style="padding-top:0">
+  <div class="wrap">
+    <h2 id="facts-title" class="kicker" style="font-size:13px;letter-spacing:.08em">At a glance</h2>
+    <dl class="facts">
+      <div><dt>What</dt><dd>Embedded AI memory + knowledge graph</dd></div>
+      <div><dt>Language</dt><dd>Go, no CGO · clients for Rust, Python, Node</dd></div>
+      <div><dt>Storage</dt><dd>One SQLite file, or PostgreSQL + pgvector</dd></div>
+      <div><dt>Models</dt><dd>Optional — lexical mode needs no API key</dd></div>
+      <div><dt>Graph</dt><dd>RDF 1.2, SPARQL, OWL 2 RL, SHACL, Cypher</dd></div>
+      <div><dt>Agents</dt><dd>80+ MCP tools · Claude Code &amp; Codex plugin</dd></div>
+      <div><dt>License</dt><dd>MIT</dd></div>
+      <div><dt>Latest</dt><dd>v2.147.1 · <time datetime="2026-11-09">9 Nov 2026</time></dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="section" id="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Features</p>
+      <h2 id="features-title">Everything an agent needs to remember, in the file next to your code.</h2>
+      <p>No service to deploy and no second database to keep in sync: SQLite by default, PostgreSQL with pgvector when you outgrow one file.</p>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2 4.5V17h8v-3.5c.8-.9 2-2.3 2-4.5a6 6 0 0 0-6-6z"/><path d="M9 21h6"/></svg></div>
+        <h3>Agent memory</h3>
+        <p><code>Remember</code>, <code>Recall</code>, <code>Reflect</code> and <code>Consolidate</code> over user, session and global scopes. Recall returns a paste-ready context pack with sources, and relational answers come back as graph facts — <em>Alice —uses→ Apollo</em> — read from edges.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+        <h3>Retrieval that walks the graph</h3>
+        <p>Vector, lexical, hybrid and graph lanes fused by rank, plus Personalized PageRank (HippoRAG 2) for questions whose answer is two hops away. <code>auto</code> picks the walk only when the question names a specific entity.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8.3 7.1 15.6 7.6M7 8.4 8.4 15.6M16.6 10.1 10.9 16.4"/></svg></div>
+        <h3>A real knowledge graph</h3>
+        <p>RDF 1.2 triple terms, SPARQL 1.1 and 1.2, read-only Cypher, RDFS and an OWL 2 RL subset, SHACL validation and SHACL-AF rules. Every inferred triple can explain itself; contradictions are reported, never guessed away.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"/><path d="m16 15 3 3-3 3"/></svg></div>
+        <h3>A change feed</h3>
+        <p>Every committed write lands in <code>change_log</code> in the same transaction — commit order, exactly once, nothing from a rollback. It keeps inferences current automatically and is what a sync or trigger builds on.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></div>
+        <h3>Built for agents</h3>
+        <p>80+ tools with the same names in-process and over MCP. A plugin gives Claude Code and Codex one shared brain with <code>/remember</code>, <code>/recall</code> and an auto-recall hook; a gRPC server shares it across machines.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg></div>
+        <h3>No model required</h3>
+        <p>CortexDB never imports an LLM SDK. Without an embedder it searches lexically — Chinese questions asked as whole sentences included — and still builds the entity graph. Add any OpenAI-compatible embeddings endpoint for vectors.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v10H4z"/><path d="M8 7V5h8v2M9 12h6"/></svg></div>
+        <h3>Ontology and governed actions</h3>
+        <p>Typed objects, links and interfaces with primary keys and cardinality, an object-set algebra, action types with an audit trail, and a breaking-change schema diff — Palantir-style, in the same file.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg></div>
+        <h3>Vectors, compact</h3>
+        <p>HNSW, IVF and flat indexes, scalar and product quantization, and 1-bit binary codes rescored exactly: recall@10 0.979–0.996 on real 768-d embeddings at 1/32 of the memory.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 3l8 4v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7z"/></svg></div>
+        <h3>Answers that say how they know</h3>
+        <p>Records carry their source, chunk, producer and a grade — verified, asserted, refused. An <code>Authorize</code> callback gates every retrieval candidate, so access control holds at the retrieval layer.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="start" aria-labelledby="start-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Get started</p>
+      <h2 id="start-title">Three ways in.</h2>
+      <p>Embed the library, give your coding agent a memory, or run one server many clients share.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3><span>01</span>In a Go program</h3>
+        <p>Open a file, remember, recall. No embedder needed.</p>
+        <div class="code">
+          <div class="code-head">main.go<button class="copy" type="button" data-copy="code-go" aria-label="Copy Go example"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre id="code-go"><code>db, _ := cortexdb.<span class="tok-f">Open</span>(cortexdb.<span class="tok-f">DefaultConfig</span>(<span class="tok-s">"brain.db"</span>))
+<span class="tok-k">defer</span> db.<span class="tok-f">Close</span>()
+brain := db.<span class="tok-f">KnowledgeMemory</span>()
+
+brain.<span class="tok-f">Remember</span>(ctx, cortexdb.KnowledgeMemoryRememberRequest{
+    Content: <span class="tok-s">"Alice prefers tabs."</span>, Scope: <span class="tok-s">"user"</span>,
+})
+rec, _ := brain.<span class="tok-f">Recall</span>(ctx, cortexdb.KnowledgeMemoryRecallRequest{
+    Query: <span class="tok-s">"what does Alice prefer?"</span>,
+})
+fmt.<span class="tok-f">Println</span>(rec.ContextPack.Text) <span class="tok-c">// with sources</span></code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <h3><span>02</span>In Claude Code or Codex</h3>
+        <p>One global brain, slash commands and auto-recall. No API key.</p>
+        <div class="code">
+          <div class="code-head">plugin<button class="copy" type="button" data-copy="code-plugin" aria-label="Copy plugin commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre id="code-plugin"><code><span class="tok-c"># Claude Code</span>
+/plugin marketplace add liliang-cn/cortexdb
+/plugin install cortexdb@cortexdb
+
+<span class="tok-c"># Codex</span>
+codex plugin marketplace add liliang-cn/cortexdb
+codex plugin add cortexdb@cortexdb
+
+<span class="tok-c"># then, in any session</span>
+/remember Our staging DB is on port 45432
+/recall staging database</code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <h3><span>03</span>From any language</h3>
+        <p>Run the gRPC server once; point clients and agents at it.</p>
+        <div class="code">
+          <div class="code-head">shell<button class="copy" type="button" data-copy="code-grpc" aria-label="Copy server and client commands"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre id="code-grpc"><code>go install github.com/liliang-cn/cortexdb/v2/cmd/cortexdb-grpc@latest
+
+<span class="tok-c"># typed clients</span>
+cargo add cortexdb-client
+pip install cortexdb-client
+npm install cortexdb-client
+
+<span class="tok-c"># share one brain between machines</span>
+export CORTEXDB_REMOTE=host:port</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="benchmarks" aria-labelledby="bench-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Benchmarks</p>
+      <h2 id="bench-title">Multi-hop recall up 15 points, with no embedding model.</h2>
+      <p>Standard retrieval benchmarks run through the same public API an application calls — <code>SaveKnowledge</code> then <code>SearchKnowledge</code> — with <code>cortexdb-bench</code>. No embedder; <code>auto</code> is the default mode.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <caption>Recall@5 on the full question sets (LongMemEval: a seeded 100-question sample). CortexDB v2.115.0 on SQLite, Apple M2 Pro.</caption>
+        <thead>
+          <tr><th scope="col">Benchmark</th><th scope="col">Kind</th><th scope="col" class="num">Lexical</th><th scope="col" class="num">Auto</th><th scope="col" class="bar-cell">Auto vs lexical</th><th scope="col" class="num">p95</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">2WikiMultiHopQA</th><td>multi-hop</td><td class="num">0.657</td><td class="num gain">0.807</td><td class="bar-cell"><div class="meter" role="img" aria-label="0.657 to 0.807"><b style="width:80.7%"></b><s style="width:65.7%"></s></div></td><td class="num">21 ms</td></tr>
+          <tr><th scope="row">MuSiQue</th><td>multi-hop</td><td class="num">0.457</td><td class="num gain">0.542</td><td class="bar-cell"><div class="meter" role="img" aria-label="0.457 to 0.542"><b style="width:54.2%"></b><s style="width:45.7%"></s></div></td><td class="num">28 ms</td></tr>
+          <tr><th scope="row">LoCoMo</th><td>conversation</td><td class="num">0.493</td><td class="num">0.495</td><td class="bar-cell"><div class="meter" role="img" aria-label="0.493 to 0.495"><b style="width:49.5%"></b><s style="width:49.3%"></s></div></td><td class="num">8 ms</td></tr>
+          <tr><th scope="row">LongMemEval</th><td>conversation</td><td class="num">0.861</td><td class="num">0.862</td><td class="bar-cell"><div class="meter" role="img" aria-label="0.861 to 0.862"><b style="width:86.2%"></b><s style="width:86.1%"></s></div></td><td class="num">15 ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">The multi-hop gain comes from a Personalized PageRank walk over the entity graph <code>SaveKnowledge</code> builds; on single-hop conversation memory <code>auto</code> holds lexical's recall, because an entity most passages mention (a conversation's speaker) is not used to start the walk. Datasets are pinned by sha256; reproduce with <a href="https://github.com/liliang-cn/cortexdb/tree/main/cmd/cortexdb-bench"><code>go run ./cmd/cortexdb-bench</code></a>.</p>
+    <div class="stats">
+      <div class="stat"><b>0.979–0.996</b><span>recall@10 of 1-bit binary codes with exact rescoring, at 1/32 of the memory</span></div>
+      <div class="stat"><b>0 wrong</b><span>answers across 3,897 openCypher TCK scenarios — what Cypher cannot do, it refuses</span></div>
+      <div class="stat"><b>W3C suites</b><span>in-scope RDF 1.2 and SPARQL 1.2 tests pass on SQLite and PostgreSQL</span></div>
+      <div class="stat"><b>Exactly once</b><span>every committed write in the change feed, in commit order; nothing from a rollback</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="see-title">
+  <div class="wrap split">
+    <div>
+      <p class="kicker">See it</p>
+      <h2 id="see-title">A brain you can look inside.</h2>
+      <p class="lede" style="font-size:1.06rem">CortexDB is inspectable by design. <code>serve_graph_3d</code> serves a live view from inside the MCP server handling the calls, so the graph lights up as agents touch it. Find any node across the whole store, ask a question, run read-only Cypher, and expand node by node. <code>graph_schema</code> reports the schema the data actually has, and every inferred fact can be traced back to the facts it came from.</p>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>Three themes, each light and dark, following the system by default</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>Works on a phone: the inspector becomes a bottom sheet</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>Every view is a link: <code>?focus=</code>, <code>?ask=</code>, <code>?cypher=</code>, <code>?theme=</code></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>One file to back up, copy, diff or open with <code>sqlite3</code></span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>Explanations for every inference, reports for every contradiction</span></li>
+      </ul>
+    </div>
+    <figure class="duo">
+      <div class="screen">
+        <div class="screen-bar" aria-hidden="true"><i></i><i></i><i></i><span>?theme=ember&amp;mode=light&amp;focus=pkg/liveview</span></div>
+        <img src="assets/img/live-view-light-1600.webp"
+             srcset="assets/img/live-view-light-800.webp 800w, assets/img/live-view-light-1600.webp 1600w"
+             sizes="(min-width: 980px) 560px, 100vw"
+             width="1600" height="1000" loading="lazy" decoding="async"
+             alt="The live view in the Ember light theme, focused on one package, with its files labelled and the inspector open">
+      </div>
+      <div class="phone">
+        <img src="assets/img/live-view-phone-390.webp"
+             srcset="assets/img/live-view-phone-390.webp 390w, assets/img/live-view-phone-780.webp 780w"
+             sizes="170px"
+             width="390" height="844" loading="lazy" decoding="async"
+             alt="The live view on a phone: the focused package at the top, the inspector as a bottom sheet">
+      </div>
+      <figcaption class="caption">Ember light on a desktop, Space dark on a phone.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="fit-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">Fit</p>
+      <h2 id="fit-title">Embedded, inspectable, local-first.</h2>
+    </div>
+    <div class="fit">
+      <div class="card">
+        <h3>A good fit when</h3>
+        <ul class="checks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>an agent needs memory and a knowledge graph without another service to run</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>you want retrieval that works offline, with no API key</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>answers must cite where they came from and how sure they are</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span>several agents or machines should share one brain</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Look elsewhere when</h3>
+        <ul class="checks no">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>you need a distributed vector database sharded across a cluster</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>you need a full enterprise RDF triple store with complete SPARQL 1.1 and OWL DL reasoning</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg><span>billions of vectors must be served at low latency to many tenants</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="faq" aria-labelledby="faq-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">FAQ</p>
+      <h2 id="faq-title">Questions, answered directly.</h2>
+    </div>
+    <div class="faq">
+      <details open><summary>What is CortexDB?</summary><div><p>CortexDB is an open-source Go library that stores an AI agent's memory and knowledge in one SQLite file: vectors, full-text search, RAG documents, scoped memories, and an RDF knowledge graph you can query with SPARQL or read-only Cypher. It runs inside your program; there is no server to operate. It is MIT licensed.</p></div></details>
+      <details><summary>Does CortexDB need an embedding model or an LLM?</summary><div><p>No. CortexDB never imports an LLM SDK. Without an embedder it uses lexical retrieval (FTS5, including Chinese and Japanese text) and still builds an entity graph that graph-walking retrieval uses. Plugging in any OpenAI-compatible embeddings endpoint, such as Ollama, adds vector and hybrid search.</p></div></details>
+      <details><summary>How is CortexDB different from a vector database?</summary><div><p>A vector database stores embeddings and answers nearest-neighbour queries. CortexDB is an embedded library that also keeps agent memory with scopes, documents for RAG, and a knowledge graph with inference and validation, all in one file next to your code. It is not a distributed vector database and not an enterprise RDF server.</p></div></details>
+      <details><summary>Can I use CortexDB from languages other than Go?</summary><div><p>Yes. The <code>cortexdb-grpc</code> server exposes the same brain over gRPC, with typed clients for Rust (<code>cargo add cortexdb-client</code>), Python (<code>pip install cortexdb-client</code>) and Node.js (<code>npm install cortexdb-client</code>). Agents can also use it through its MCP server.</p></div></details>
+      <details><summary>Does CortexDB work with Claude Code and Codex?</summary><div><p>Yes. It ships as a plugin for both. In Claude Code run <code>/plugin marketplace add liliang-cn/cortexdb</code>, then <code>/plugin install cortexdb@cortexdb</code>. The plugin runs in lexical mode with no API key and keeps one global brain at <code>~/.cortexdb/cortexdb.db</code>; point several machines at one <code>cortexdb-grpc</code> server to share it.</p></div></details>
+      <details><summary>Which databases can CortexDB run on?</summary><div><p>SQLite by default, through the pure-Go modernc.org/sqlite driver, so there is no CGO. A <code>postgres://</code> connection string moves the same brain to PostgreSQL with pgvector; vectors, hybrid search, memory and the RDF graph behave the same on both.</p></div></details>
+      <details><summary>What graph queries does CortexDB support?</summary><div><p>SPARQL 1.1 (a documented practical subset) with SPARQL 1.2 triple terms, read-only Cypher over the property graph, RDFS and an OWL 2 RL subset kept current automatically as facts change, SHACL validation and SHACL-AF triple rules. The in-scope W3C RDF 1.2 and SPARQL 1.2 test suites pass on SQLite and PostgreSQL.</p></div></details>
+      <details><summary>How good is CortexDB's retrieval without an embedder?</summary><div><p>Measured through the public API with <code>cortexdb-bench</code>, no embedder, recall@5 in the default <code>auto</code> mode against plain lexical search: 2WikiMultiHopQA 0.807 vs 0.657, MuSiQue 0.542 vs 0.457, LoCoMo 0.495 vs 0.493, LongMemEval 0.862 vs 0.861, with p95 latency under 30 ms. The multi-hop gains come from a Personalized PageRank walk over the entity graph.</p></div></details>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="cta-title">
+  <div class="wrap">
+    <div class="cta">
+      <div>
+        <h2 id="cta-title">Give your agent a memory today.</h2>
+        <p>Open source under MIT. One command to add it to a Go module.</p>
+      </div>
+      <div class="hero-cta" style="margin:0">
+        <a class="btn btn-primary" href="https://github.com/liliang-cn/cortexdb">Star on GitHub</a>
+        <a class="btn btn-ghost" href="https://pkg.go.dev/github.com/liliang-cn/cortexdb/v2">API reference</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="./"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#15171c"/><path d="M20 42 L32 20 L45 40 Z" fill="none" stroke="#5fd3b4" stroke-width="3.4" stroke-linecap="round" opacity=".55"/><circle cx="32" cy="20" r="6.5" fill="#5fd3b4"/><circle cx="20" cy="42" r="6.5" fill="#fff"/><circle cx="45" cy="40" r="6.5" fill="#fff"/></svg>CortexDB</a>
+        <p style="margin-top:12px;max-width:28em">AI memory and a knowledge graph in one SQLite file. Pure Go.</p>
+      </div>
+      <div>
+        <h4>Docs</h4>
+        <ul>
+          <li><a href="https://github.com/liliang-cn/cortexdb/blob/main/docs/GUIDE.md">Guide</a></li>
+          <li><a href="https://pkg.go.dev/github.com/liliang-cn/cortexdb/v2">Go API reference</a></li>
+          <li><a href="https://github.com/liliang-cn/cortexdb/tree/main/examples">Examples</a></li>
+          <li><a href="https://github.com/liliang-cn/cortexdb/blob/main/CHANGELOG.md">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Clients</h4>
+        <ul>
+          <li><a href="https://crates.io/crates/cortexdb-client">Rust</a></li>
+          <li><a href="https://pypi.org/project/cortexdb-client/">Python</a></li>
+          <li><a href="https://www.npmjs.com/package/cortexdb-client">Node.js</a></li>
+          <li><a href="https://github.com/liliang-cn/cortexdb/releases">gRPC server binaries</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>More</h4>
+        <ul>
+          <li><a href="https://github.com/liliang-cn/cortexdb">GitHub</a></li>
+          <li><a href="llms.txt">llms.txt</a></li>
+          <li><a href="zh/" hreflang="zh-CN" lang="zh-CN">中文</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fine">
+      <span>© 2026 Liang Li · MIT License</span>
+      <span>Updated <time datetime="2026-11-09">9 November 2026</time> · v2.147.1</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/site.js?v=2026100201" defer></script>
+<script defer data-domain="liliang-cn.github.io" src="https://stats.superleo.cn/js/script.js"></script>
+</body>
+</html>

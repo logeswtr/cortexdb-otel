@@ -1,0 +1,220 @@
+// Package liveview serves a knowledge graph as a live page.
+//
+// A rendered file is true for the instant it was taken. This serves a page
+// instead — on 127.0.0.1 — that keeps up with the graph on its own, so a graph
+// being written can be watched rather than re-rendered.
+//
+// # The app
+//
+// The page is a single-page app (pkg/liveview/ui: Vite, React, TypeScript,
+// Tailwind, shadcn) built into pkg/liveview/dist, which is committed and
+// embedded, so installing the module needs no Node. Go serves only /api/*, the
+// app's hashed build files under /assets/ (cached for good, compressed once),
+// and the app's own routes (/, /changes, /entity, /activity, /recalls,
+// /library, /ontology, /ontology-history), which all answer with the index.
+// The index is never cached and carries one tag the server rewrites,
+// <base href="/" data-cortexdb-base>: when the view is mounted under a prefix
+// of another mux, the prefix the mux stripped becomes the base, and since
+// every URL the app uses is resolved against it, that is all a mount takes. An
+// unknown /api/ path is a 404 and never the index. Go writes no HTML of its
+// own: the last four routes were pages in Go strings until the app took them
+// over, at the same paths and with the same query options.
+//
+// A host can leave pages out ([WithoutPages]): the server writes their names
+// into the index beside the base tag (<meta name="cortexdb-hidden-pages">),
+// the app drops them from its navigation, palette, router and links, and the
+// server answers 404 for their paths and for the API routes only they read.
+// The graph and the entity page cannot be left out.
+//
+// # The stream
+//
+// /api/stream is one server-sent-event connection per open page:
+//
+//   - snapshot — the whole graph, with `cursor` (the change feed's head when
+//     the subscription was taken, 0 when the source has no feed) and `changes`
+//     (whether this source emits change events at all).
+//   - delta — nodes and relations appearing or disappearing; what moves the graph.
+//   - activity — a tool call, observed where it was handled.
+//   - change — one readable [ChangeItem] per row of the store's change feed:
+//     the kind, the op (added, updated, superseded, retracted, merged,
+//     deleted), the sentence ("Leo lives_in Chengdu"), the reason and
+//     producer, what a closed row was replaced by, what a new one replaced,
+//     and the schema version the decision was made under. Made by [ChangeItems]
+//     from the feed's events, the graph the view holds and labels the store
+//     resolved for the page in one batch, so the cost does not grow with the
+//     page. Updates that moved only usage accounting (a recall bumping a
+//     memory's counters) are left out, decided by comparing the row before and
+//     after. Change frames, and only they, carry `id: <seq>`.
+//   - reset — the page's cursor cannot be replayed from (older than retention,
+//     from a brain further along, or too far behind); a fresh snapshot follows
+//     on the same connection and the stream continues from the head.
+//   - ping — keepalive.
+//
+// A connection that names where it stopped, by Last-Event-ID (which the browser
+// sends on its own) or ?after=, is answered from the feed's log: the snapshot,
+// then the changes after the cursor up to the snapshot's own cursor, oldest
+// first, then live. The hub hands out the cursor under the lock that registers
+// the subscription, so the replay and the live tail neither leave a gap nor
+// repeat an event. A page that stops draining its stream is closed rather than
+// left listening to a stream with holes in it; the browser reconnects and
+// resumes. A page pinned to an instant (?as_of=) receives one snapshot and no
+// live events, as before.
+//
+// /api/changes pages the same feed backwards for the timeline, newest first
+// with `before`, filtered by kind, op, producer and entity; /api/entity groups
+// one node's relations by predicate from the graph the view already holds.
+// Both read through [Source.ChangeLog], which is the same call on a local file
+// and on a shared brain (the changes_since tool) and is nil for a source with no
+// feed.
+//
+// # What moves
+//
+// Two things move on the page, and they arrive by different routes:
+//
+//   - Structure — nodes and relations appearing or disappearing. Found by
+//     asking the store's change feed every couple of seconds what was written,
+//     and re-reading and diffing the graph only when a node or edge was (and
+//     once a minute regardless) — it can be written by any process sharing it.
+//     Only the difference is sent, so the layout keeps every node that did not
+//     change exactly where it had settled.
+//   - Activity — a query running, something being saved, a relation drawn.
+//     A query changes nothing in the graph, so no amount of polling can show
+//     one. These are reported by whoever handled the call, through
+//     [Server.Observe], and light up the nodes they named. An MCP server
+//     builds each [Event] from the call with [ClassifyToolCall]; a host that
+//     reads its store through the Go API builds its own and names what it
+//     read in [Event.Nodes], by id, which the page lights exactly, where
+//     [Event.Terms] are matched loosely against names.
+//
+// What is drawn is coloured by node type, which answers "what is in here". The
+// other question a person brings to a picture of a brain is which of it anybody
+// checked, and the knowledge contract answers that per record — so [Node] and
+// [Edge] carry the record's `_grade` and the page has a switch between the two
+// palettes. Type is the default and stays it. Grade mode draws the contract's
+// five in the product's own colours, lifted for this background (see grade.go),
+// with [GradeLegend] as the legend — an unexplained colour scheme is decoration
+// — and it colours the relations as well as the things, because a graph's
+// assertions are mostly edges. A source whose reads do not carry grades sets
+// [Source.Grades] false and the legend says so, which is a different finding
+// from a store on which nothing is graded.
+//
+// Selecting a node or a relation opens the inspector, which is the fourth route
+// onto the page and the one that joins the picture to the product: the record's
+// source file and chunk, its producer, its grade and the reason for it, when the
+// fact became true, the text it was drawn from, what it was recorded as
+// contradicting, and the decision somebody signed against it — every id among
+// them a link, so a reader can walk from a fact to what disagrees with it
+// without going back to the search box. It arrives through [Source.Record] as a
+// [RecordDetail], fetched once per click rather than polled, which is what makes
+// it affordable to answer that expensively. Nil is a legitimate answer here too,
+// and there are three states rather than two: the source cannot be asked, the
+// source looked and the shelf no longer holds this, and here is the record.
+//
+// The page can also be pinned to an instant. [Source.ReadAsOf] reads the graph
+// as it stood then, through the same as-of machinery every other past read in
+// the module uses, and the page says so in a banner that cannot be folded
+// away — a graph quietly showing last week is worse than one that cannot show
+// it at all. Live updates stop while pinned, and stop on the server: a pinned
+// stream never subscribes to the poller, so there is no delta to arrive. Per
+// connection, not per server, because one reader looking at last Tuesday must
+// not freeze the page of the reader beside them.
+//
+// A third thing on the page does not move, and says so by arriving differently.
+// The contract panel answers how much of this store stands on what, and what on
+// it is waiting for a person — the knowledge contract, read back through
+// [Source.Contract] as a [ContractReport]. It is two aggregate scans and a
+// filtered read over a shelf that changes when somebody reviews a record, so
+// the panel fetches it from /api/contract on its own slow timer
+// ([ContractInterval]) rather than riding the structure poll. A source that
+// keeps no contract leaves the hook nil, and the panel says that in words: a
+// store nobody can ask and a store nobody has graded are different findings,
+// and the second is the one a real machine is usually in.
+//
+// Besides the ontology page described next, a page at /library draws the
+// instance graph again as a reading room rather than a field of points: a
+// memory is a book on the shelf of the project it names, shelves stand in wings
+// cut from the projects' own relations, an entity is an index card, and a book
+// opens on a lectern. It reads the same snapshot the graph page polls, so the
+// two never disagree about what is in the brain; library.go says what is
+// shelved where and why.
+//
+// There is a second page, at /ontology, and it draws a different graph about
+// the same store: not what is in this brain but what it is allowed to talk
+// about — tens of declared object types with link types between them, read
+// back through [Source.Ontology] as an [OntologyReport]. It is drawn as a
+// deterministic 2D diagram rather than in the scene next door, for the reason
+// spelled out over the page (ui/src/pages/OntologyPage.tsx): an ontology is tens of named nodes with
+// declared structure — interfaces, link direction, a foreign key on one side —
+// and a force layout can only express distance.
+//
+// A picture of the declarations alone describes intent. Held against what the
+// store's records are actually typed as, it describes reality, and the gap is
+// the finding: a declared type at zero instances is something nobody used, a
+// node_type nothing declares is the reverse, and on a real brain it is most of
+// them. Which of the four things this page has to say — the source cannot be
+// asked, nothing is saved, a schema is saved and unused, a schema is in use —
+// is [OntologyReport.State], decided in Go so the page never reads an empty
+// list and guesses.
+//
+// That page has a second half, because on a real brain the first half is a
+// dead end: nothing is declared, so the diagram is empty and the finding is
+// "nobody has modelled this store". [Source.Draft] answers the question that
+// leaves — what *could* be declared — by deriving a first schema from the
+// store's own vocabulary and drawing it through the same lanes, the same
+// curves and the same overlay, so the counts under the boxes are real and the
+// band outside the model is exactly what the deriver bucketed out or withheld.
+// It arrives as an [OntologyDraftView], which is an [OntologyReport] plus the
+// half a draft has and a saved schema does not: the questions a person has to
+// answer before signing it, and the threshold the drawing was pruned at.
+// Nothing on that path writes — [OntologyDrafted] is a proposal, saving is a
+// person's act done through ontology_save — and its three states
+// ([OntologyDrafted], [OntologyNothingToDraft], [OntologyUndraftable]) share
+// no word with the saved four, so a draft can never be handed a saved
+// schema's sentence.
+//
+// The page can also be asked, not only looked at — the subject of explore.go.
+// The scene is the store's most-connected core, a few percent of a real brain,
+// and the Explore bar reaches past it: find a node by name anywhere in the
+// store, ask the brain a question and light up what the answer names, run
+// read-only Cypher, and expand any node to its neighbours whether or not the
+// core drew them. Each runs one of the brain's own tools through
+// [Source.Call] — the toolbox for a local file, the ToolsService for a shared
+// brain — so a shared brain also gets the inspector it lacked. Only tools on
+// [ExploreTools] can be run that way, every one a read, beside the recall-log
+// tools of [RecallTools] (recalls.go). Every starting point is
+// a URL parameter too (?focus, ?ask, ?cypher, ...), so a view is a link that
+// can be shared, and on a phone the inspector is a bottom sheet and the corner
+// panels start folded.
+//
+// A page at /recalls reads the brain's recall log, when it keeps one: each
+// recall's query, who asked, its hits and how each was found, its explain
+// record, which records recalls reach and which they never do, and a mark per
+// hit (useful or noise) that downloads as recall-eval golden cases. The graph
+// page shades nodes by how often recalls reached them (?color=recalls) and
+// replays one recall (?replay=<id>). See recalls.go.
+//
+// A caller supplies a [Source], which is anything that can read nodes and
+// edges. [OpenSource] builds one from the ambient CortexDB configuration
+// (CORTEXDB_REMOTE for a shared brain, CORTEXDB_PATH otherwise), and
+// [LoadLocal] and [LoadRemote] are exported for callers that know which graph
+// they want and would rather say so than set environment variables.
+//
+// The listener binds 127.0.0.1 and there is deliberately no option to widen it.
+// The page is the whole graph with no authentication in front of it, so a
+// listener on any other interface would be an unauthenticated read of
+// everything it contains. An embedder that needs to expose it further should
+// put its own authenticated proxy in front rather than ask for a wider bind.
+//
+// Typical use:
+//
+//	src, err := liveview.OpenSource(ctx)
+//	if err != nil {
+//		return err
+//	}
+//	sv, err := liveview.Start(ctx, src, liveview.DefaultPort, liveview.DefaultInterval, false)
+//	if err != nil {
+//		return err
+//	}
+//	defer sv.Close()
+//	fmt.Println(sv.URL())
+package liveview
