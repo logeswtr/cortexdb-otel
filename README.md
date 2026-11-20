@@ -268,3 +268,10 @@ CortexDB OTel aims to explore a new approach to observability: transforming tele
 ---
 
 **From Telemetry to Knowledge. From Knowledge to Intelligence.**
+
+## otlpextension
+
+The Go service in this repository receives OTLP traces, logs and metrics from an
+OpenTelemetry Collector and writes distilled incidents, a service map and metric
+anomalies into CortexDB. See [docs/otlpextension.md](docs/otlpextension.md) for
+the architecture, Collector config, settings and how to run it.
