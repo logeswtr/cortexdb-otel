@@ -268,3 +268,14 @@ CortexDB OTel aims to explore a new approach to observability: transforming tele
 ---
 
 **From Telemetry to Knowledge. From Knowledge to Intelligence.**
+
+---
+
+## Repository layout
+
+This repository holds a full copy of [CortexDB](https://github.com/liliang-cn/cortexdb) (its upstream README is kept as [README.cortexdb.md](README.cortexdb.md)) together with the OTLP service built for it:
+
+| Path | What it is |
+| --- | --- |
+| `contrib/otlpextension/` | Go service that receives OTLP traces, logs and metrics from an OpenTelemetry Collector and teaches CortexDB from them. Its own Go module, so OpenTelemetry and gRPC stay out of the CortexDB module. See [its README](contrib/otlpextension/README.md). |
+| everything else | CortexDB itself, unchanged from upstream at the commit this branch was cut from. |

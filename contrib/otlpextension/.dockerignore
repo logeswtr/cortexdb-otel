@@ -1,0 +1,4 @@
+otlpextension
+*.md
+*_test.go
+.git

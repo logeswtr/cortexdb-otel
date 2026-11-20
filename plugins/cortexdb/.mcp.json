@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "cortexdb": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cortexdb-mcp"
+    }
+  }
+}

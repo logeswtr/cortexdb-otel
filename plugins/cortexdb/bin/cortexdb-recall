@@ -1,0 +1,79 @@
+#!/bin/sh
+# CortexDB auto-recall launcher for Claude Code and Codex UserPromptSubmit hooks.
+#
+# On each prompt it: locates the project's cortexdb.db, honors a global on/off
+# choice, and — when enabled — runs `cortexdb-mcp --recall` to inject matched
+# memories as additionalContext.
+#
+# It NEVER blocks the prompt: every problem path exits 0 with no output.
+#
+#   cortexdb-recall            run as the hook (reads hook JSON on stdin)
+#   cortexdb-recall --enable   turn auto-recall on  (writes the global sentinel)
+#   cortexdb-recall --disable  turn auto-recall off
+#
+# DB path:   $CORTEXDB_PATH, else the global ~/.cortexdb/cortexdb.db (skipped if absent).
+# Override the server binary with $CORTEXDB_MCP_BIN.
+set -eu
+
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/cortexdb"
+sentinel="${cache_root}/autorecall"
+
+# Absolute path to this launcher, so the first-run prompt can tell Claude exactly
+# what to run regardless of its working directory.
+self="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+
+case "${1:-}" in
+  --enable)  mkdir -p "$cache_root"; printf 'on\n'  > "$sentinel"; echo "CortexDB auto-recall enabled.";  exit 0 ;;
+  --disable) mkdir -p "$cache_root"; printf 'off\n' > "$sentinel"; echo "CortexDB auto-recall disabled."; exit 0 ;;
+esac
+
+# Resolve the DB the same way the server does: explicit CORTEXDB_PATH, else the
+# global ~/.cortexdb/cortexdb.db. Never create one here — recall is read-only.
+db="${CORTEXDB_PATH:-$HOME/.cortexdb/cortexdb.db}"
+if [ -z "${CORTEXDB_REMOTE:-}" ]; then
+  [ -f "$db" ] || exit 0
+fi
+# Pin the recall binary to the exact file we validated above.
+export CORTEXDB_PATH="$db"
+
+if [ -f "$sentinel" ]; then
+  case "$(cat "$sentinel" 2>/dev/null || true)" in
+    on*) : ;;        # enabled: fall through to recall
+    *)   exit 0 ;;   # off / anything else: stay quiet
+  esac
+else
+  # First run on this machine: have Claude ask the user once, then record it.
+  msg="CortexDB auto-recall is installed but not yet configured on this machine. Before answering, ask the user once whether they want CortexDB memories automatically retrieved and injected on every prompt. If they say yes, run: ${self} --enable . If they say no, run: ${self} --disable . Then continue with their request."
+  printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}\n' "$msg"
+  exit 0
+fi
+
+# A Claude Code session running the cortexdb-live mod recalls in-process.
+[ "${CORTEXDB_RECALL_BY_MOD:-}" = 1 ] && exit 0
+
+# Enabled: reuse the same prebuilt MCP binary, in one-shot --recall mode.
+if [ -n "${CORTEXDB_MCP_BIN:-}" ] && [ -x "${CORTEXDB_MCP_BIN}" ]; then
+  exec "${CORTEXDB_MCP_BIN}" --recall
+fi
+
+os="$(uname -s)"; arch="$(uname -m)"
+case "$os" in Darwin) goos=darwin ;; Linux) goos=linux ;; *) exit 0 ;; esac
+case "$arch" in x86_64|amd64) goarch=amd64 ;; arm64|aarch64) goarch=arm64 ;; *) exit 0 ;; esac
+asset="cortexdb-mcp-${goos}-${goarch}"
+
+# Match the MCP launcher's cache layout: version-pinned and CLAUDE_PLUGIN_DATA-aware.
+bin_cache_dir="${CLAUDE_PLUGIN_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/cortexdb}/bin"
+plugin_root="${CLAUDE_PLUGIN_ROOT:-$(dirname "$self")/..}"
+version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "${plugin_root}/.claude-plugin/plugin.json" 2>/dev/null | head -n1)"
+
+# Use the binary the MCP launcher already fetched (versioned first, then legacy).
+# Don't download from inside a per-prompt hook; stay quiet until it's cached.
+bin=""
+if [ -n "$version" ] && [ -x "${bin_cache_dir}/${asset}-${version}" ]; then
+  bin="${bin_cache_dir}/${asset}-${version}"
+elif [ -x "${bin_cache_dir}/${asset}" ]; then
+  bin="${bin_cache_dir}/${asset}"
+fi
+[ -n "$bin" ] || exit 0
+exec "$bin" --recall

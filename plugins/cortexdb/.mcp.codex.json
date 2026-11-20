@@ -1,0 +1,6 @@
+{
+  "cortexdb": {
+    "command": "./bin/cortexdb-mcp",
+    "cwd": "."
+  }
+}
