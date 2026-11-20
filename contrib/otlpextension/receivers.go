@@ -13,6 +13,7 @@ import (
 	coltrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	_ "google.golang.org/grpc/encoding/gzip" // the Collector's otlp exporter gzips by default
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
